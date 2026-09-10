@@ -96,6 +96,89 @@
 <body class="bg-[#1a1a1a] text-white">
 <div id="root" class="opacity-100 scale-100"></div>
 
+<script type="module">
+  // 1. Import Firebase SDK (Versi 9/10 Modular)
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
+  import { 
+    getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc 
+  } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+
+  // 2. Masukkan Firebase Config Anda di sini
+  const firebaseConfig = {
+  apiKey: "AIzaSyCcBy3hwZYTRipHf0XWwiq692KmYwfYqAs",
+  authDomain: "gaspol-25282.firebaseapp.com",
+  projectId: "gaspol-25282",
+  storageBucket: "gaspol-25282.firebasestorage.app",
+  messagingSenderId: "978835065624",
+  appId: "1:978835065624:web:11c30370f8aa391ee46c6d"
+};
+
+  // 3. Inisialisasi Firebase
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+
+  // 4. Konfigurasi Cloudinary
+  window.CLOUDINARY_URL = "https://api.cloudinary.com/v1_1/i44xkscy/image/upload";
+  window.CLOUDINARY_PRESET = "GASPOL"; // Pastikan Unsigned
+
+  // 5. Expose Firebase ke global window agar bisa diakses script lama Anda
+  window.db = db;
+  window.doc = doc;
+  window.setDoc = setDoc;
+  window.deleteDoc = deleteDoc;
+  window.collection = collection;
+
+  const activeTasksQuery = window.query(window.collection(db, "gaspol_tasks"), window.where("isArchived", "==", false));
+  window.onSnapshot(activeTasksQuery, (snapshot) => {
+    window.tasks = [];
+    const todayNum = new Date().getTime();
+    
+    snapshot.forEach((doc) => {
+      let t = doc.data();
+      if (t.done && t.doneDate) {
+        const doneDateNum = new Date(t.doneDate + 'T00:00:00').getTime();
+        const diffDays = Math.round((todayNum - doneDateNum) / 86400000);
+        if (diffDays >= 3) {
+          t.isArchived = true;
+          window.setDoc(window.doc(window.db, "gaspol_tasks", t.id), t);
+          return; 
+        }
+      }
+      window.tasks.push(t);
+    });
+    if(window.state && window.state.currentUser) { if(typeof renderTabContent === 'function') renderTabContent(); }
+  });
+
+  const activeSchedulesQuery = window.query(window.collection(db, "gaspol_schedules"), window.where("isArchived", "==", false));
+  window.onSnapshot(activeSchedulesQuery, (snapshot) => {
+    window.schedules = [];
+    const todayNum = new Date().getTime();
+    
+    snapshot.forEach((doc) => {
+      let s = doc.data();
+      if (s.status === 'Done' || s.status === 'Canceled') {
+        const agendaDateNum = new Date(s.tanggal + 'T00:00:00').getTime();
+        const diffDays = Math.round((todayNum - agendaDateNum) / 86400000);
+        if (diffDays >= 3) {
+          s.isArchived = true;
+          window.setDoc(window.doc(window.db, "gaspol_schedules", s.id), s);
+          return; 
+        }
+      }
+      window.schedules.push(s);
+    });
+    if(window.state && window.state.currentUser) { if(typeof renderTabContent === 'function') renderTabContent(); }
+  });
+window.db = db;
+window.doc = doc;
+window.setDoc = setDoc;
+window.deleteDoc = deleteDoc;
+window.collection = collection;
+window.getDocs = getDocs; // BARU
+window.query = query;     // BARU
+window.where = where;     // BARU
+</script>
+
 <script>
 /* =========================================================================
    UTIL & DATA
@@ -152,14 +235,25 @@ const USERS = [
   { id:"u17", name:"Rini Ernawati", divisi:"Keperawatan", jabatan:"Manajer Keperawatan", email:"user8@gmail.com", password:"RE09091979"},
 ];
 
-// Mengambil data dari Local Storage jika ada, jika kosong maka gunakan array kosong []
-let tasks = JSON.parse(localStorage.getItem('gaspol_tasks')) || [];
-let schedules = JSON.parse(localStorage.getItem('gaspol_schedules')) || [];
+// Variabel akan diisi otomatis oleh onSnapshot Firebase dari Langkah 2
+window.tasks = window.tasks || [];
+window.schedules = window.schedules || [];
 
-// Fungsi untuk menyimpan data ke Local Storage
-function saveData() {
-  localStorage.setItem('gaspol_tasks', JSON.stringify(tasks));
-  localStorage.setItem('gaspol_schedules', JSON.stringify(schedules));
+// Fungsi saveData diubah menjadi async untuk push data ke Firestore
+window.saveData = async function() {
+  try {
+    // Karena arsitektur lama Anda mengedit array langsung lalu memanggil saveData(),
+    // kita loop array-nya dan pastikan sinkron ke Firestore.
+    // (Cara ini aman untuk transisi cepat dari localStorage ke Firebase)
+    for (const t of tasks) {
+      await window.setDoc(window.doc(window.db, "gaspol_tasks", t.id), t);
+    }
+    for (const s of schedules) {
+      await window.setDoc(window.doc(window.db, "gaspol_schedules", s.id), s);
+    }
+  } catch (error) {
+    console.error("Error saving data to Firebase:", error);
+  }
 }
 
 const TASK_STATUS_STYLE = {
@@ -1157,7 +1251,8 @@ window.saveNotulensi = function(scheduleId){
           desc: `Tugas turunan dari hasil rapat: ${s.nama}`, 
           scheduleRefId: scheduleId, // <--- INI BARIS YANG SEBELUMNYA TERLEWAT
           deadline: t.deadline, 
-          deadlineTime: '23:59', 
+          deadlineTime: '23:59',
+isArchived: false, 
           taskLink: '', 
           divisi: t.divisi, 
           pic: t.pic,    
@@ -1213,6 +1308,7 @@ window.submitAddSchedule = function(e){
     isHybrid: isHybrid, zoomLink: zoomLink,
     divisi: Array.from(state.addScheduleDivisi),
     users: finalUsers, status: 'Scheduled', notulensi: '',
+isArchived: false,
   });
   
   saveData(); // Simpan ke Local Storage
@@ -1547,31 +1643,44 @@ function renderLogin(){
   renderLoginCardContent();
 }
 
-window.submitLogin = function(e){
+window.submitLogin = async function(e){
   e.preventDefault();
   const nameInput = document.getElementById('login-name').value;
   const passInput = document.getElementById('login-password').value;
+  
+  const btnSubmit = e.target.querySelector('button[type="submit"]');
+  const originalText = btnSubmit.innerHTML;
+  btnSubmit.innerHTML = "Memeriksa...";
+  btnSubmit.disabled = true;
 
-  let successUser = null;
-  if (state.loginType === 'admin') {
-    successUser = ADMIN_USERS.find(x => x.name === nameInput && x.password === passInput);
-  } else if (state.loginType === 'user') {
-    const u = USERS.find(x => x.name === nameInput && x.password === passInput);
-    if (u) successUser = { ...u, role: 'user' };
-  }
+  try {
+    const q = window.query(window.collection(window.db, "gaspol_users"), window.where("name", "==", nameInput));
+    const querySnapshot = await window.getDocs(q);
+    
+    let successUser = null;
+    querySnapshot.forEach((doc) => {
+      const u = doc.data();
+      if (u.password === passInput && u.role === state.loginType) {
+        successUser = u;
+      }
+    });
 
-  if (successUser) {
-    state.currentUser = successUser;
-    const root = document.getElementById('root');
-    root.style.opacity = '0';
-    root.style.transform = 'scale(0.95)';
-    setTimeout(() => {
-      mountApp();
-      root.style.opacity = '1';
-      root.style.transform = 'scale(1)';
-    }, 500);
-  } else {
-    alert('Login Gagal: Nama atau Password salah!');
+    if (successUser) {
+      state.currentUser = successUser;
+      const root = document.getElementById('root');
+      root.style.opacity = '0';
+      root.style.transform = 'scale(0.95)';
+      setTimeout(() => { mountApp(); root.style.opacity = '1'; root.style.transform = 'scale(1)'; }, 500);
+    } else {
+      alert('Login Gagal: Nama, Password, atau Akses Role salah!');
+      btnSubmit.innerHTML = originalText;
+      btnSubmit.disabled = false;
+    }
+  } catch (error) {
+    console.error("Error login:", error);
+    alert("Terjadi kesalahan saat memverifikasi data login.");
+    btnSubmit.innerHTML = originalText;
+    btnSubmit.disabled = false;
   }
   return false;
 };
@@ -1594,9 +1703,16 @@ window.logout = function(){
 function renderTopBar(){
   const cu = state.currentUser;
   const tabs = [ ['home','Home','home'], ['schedule','Schedule','calendar-days'], ['task','Task','list-checks'] ];
+
+if (cu.role === 'admin') {
+    tabs.push(['export', 'Data Laporan', 'database']);
+  }
+
   const activeIndex = tabs.findIndex(t => t[0] === state.activeTab);
   const translateClass = activeIndex === 0 ? 'translate-x-0' : activeIndex === 1 ? 'translate-x-full' : 'translate-x-[200%]';
   const isHome = state.activeTab === 'home';
+
+
 
   return `
   <div class="${isHome ? 'absolute top-0 left-0 w-full bg-transparent text-white' : 'sticky top-0 bg-white border-b border-gray-200 text-gray-900'} z-40 px-4 py-4 md:px-8 md:py-5 transition-all duration-500 shadow-sm">
@@ -2840,13 +2956,16 @@ function renderTabContent(){
   const el = document.getElementById('tab-content');
   if(!el) return;
 
-checkAutoDoneSchedules();
+  checkAutoDoneSchedules();
   const isAdmin = state.currentUser.role === 'admin';
   let html = '';
   
   if(state.activeTab === 'home') html = isAdmin ? renderHomeAdmin() : renderHomeUser();
   if(state.activeTab === 'schedule') html = isAdmin ? renderScheduleAdmin() : renderScheduleUser();
   if(state.activeTab === 'task') html = isAdmin ? renderTaskAdmin() : renderTaskUser();
+  
+  // Rute baru
+  if(state.activeTab === 'export' && isAdmin) html = renderExportAdmin();
   
   el.innerHTML = html;
   refreshIcons();
@@ -2855,52 +2974,164 @@ checkAutoDoneSchedules();
 /* =========================================================================
    FUNGSI DOKUMENTASI (FOTO) & HOLD
    ========================================================================= */
-window.handleUploadDokumentasi = function(input, scheduleId) {
+window.handleUploadDokumentasi = async function(input, scheduleId) {
   if(input.files && input.files[0]) {
     const s = schedules.find(x => x.id === scheduleId);
     if(!s.dokumentasi) s.dokumentasi = [];
     if(s.dokumentasi.length >= 2) return alert('Maksimal hanya 2 foto dokumentasi!');
     
     const file = input.files[0];
-    const reader = new FileReader();
-    reader.onload = function(e) {
-      const img = new Image();
-      img.onload = function() {
-        const canvas = document.createElement('canvas');
-        const MAX_WIDTH = 600; 
-        let width = img.width;
-        let height = img.height;
+    
+    // Tampilkan indikator loading (opsional tapi disarankan)
+    alert("Sedang mengupload gambar ke server, mohon tunggu sebentar...");
+
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("upload_preset", window.CLOUDINARY_PRESET);
+
+    try {
+      // Hit API Cloudinary
+      const response = await fetch(window.CLOUDINARY_URL, {
+        method: "POST",
+        body: formData
+      });
+      
+      const data = await response.json();
+      
+      if(data.secure_url) {
+        // Simpan URL Cloudinary ke dalam array dokumentasi
+        s.dokumentasi.push(data.secure_url);
         
-        if (width > MAX_WIDTH) {
-          height = Math.round((height * MAX_WIDTH) / width);
-          width = MAX_WIDTH;
-        }
+        // Simpan perubahan ke Firebase
+        await window.saveData();
         
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, width, height);
-        
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
-        
-        s.dokumentasi.push(dataUrl);
-        saveData();
-        openModal("dokumentasi", s); // Me-render ulang khusus modal dokumentasi
+        alert("Gambar berhasil diupload!");
+        openModal("dokumentasi", s); // Render ulang modal
+      } else {
+        alert("Gagal mengupload gambar. Periksa Cloudinary config Anda.");
       }
-      img.src = e.target.result;
+    } catch (error) {
+      console.error("Upload error:", error);
+      alert("Terjadi kesalahan saat mengupload gambar.");
     }
-    reader.readAsDataURL(file);
   }
 };
 
-window.hapusDokumentasi = function(scheduleId, index) {
+window.hapusDokumentasi = async function(scheduleId, index) {
   const s = schedules.find(x => x.id === scheduleId);
   if(s && s.dokumentasi) {
     s.dokumentasi.splice(index, 1);
-    saveData();
-    openModal("dokumentasi", s); // Me-render ulang khusus modal dokumentasi
+    await window.saveData(); // Tambahkan await
+    openModal("dokumentasi", s); 
   }
 };
+
+function renderExportAdmin() {
+  const currentMonth = toISO(today).slice(0, 7); // Format YYYY-MM
+  
+  return `
+  <div class="max-w-[90rem] mx-auto px-4 md:px-8 py-8 anim-slideup">
+    <div class="bg-white rounded-3xl border border-gray-200 shadow-sm p-8 space-y-8">
+      <div>
+        <h2 class="text-2xl font-extrabold text-gray-900 flex items-center gap-2">${icon('database', 'w-6 h-6 text-blue-500')} Pusat Unduh Data Laporan</h2>
+        <p class="text-gray-500 text-sm mt-1">Tarik data raw (CSV) seluruh data (termasuk yang sudah diarsipkan) untuk dibuka di Spreadsheet atau Excel.</p>
+      </div>
+
+      <div class="p-5 bg-gray-50 border border-gray-200 rounded-2xl flex flex-col sm:flex-row items-end gap-4 max-w-xl">
+        <div class="w-full sm:w-auto flex-1">
+          <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Pilih Bulan & Tahun</label>
+          <input type="month" id="export-month" class="field-input w-full" value="${currentMonth}" />
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-4xl">
+        <button onclick="downloadCSV('agenda')" class="p-6 border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 rounded-2xl text-left transition-all group">
+          <div class="p-3 bg-emerald-500 text-white w-max rounded-xl mb-4 group-hover:scale-110 transition-transform">${icon('calendar-check', 'w-6 h-6')}</div>
+          <h3 class="font-bold text-emerald-900 text-lg mb-1">Export Data Agenda</h3>
+          <p class="text-xs text-emerald-700">Tarik data: Tanggal Input, Nama, Jadwal, Divisi Hadir, Peserta, Notulensi, dan Foto Dokumentasi.</p>
+        </button>
+
+        <button onclick="downloadCSV('task')" class="p-6 border border-orange-200 bg-orange-50 hover:bg-orange-100 rounded-2xl text-left transition-all group">
+          <div class="p-3 bg-orange-500 text-white w-max rounded-xl mb-4 group-hover:scale-110 transition-transform">${icon('list-checks', 'w-6 h-6')}</div>
+          <h3 class="font-bold text-orange-900 text-lg mb-1">Export Data Tugas</h3>
+          <p class="text-xs text-orange-700">Tarik data: Tgl Input, Nama, Detail, Deadline, Divisi, PIC, Progres, Hambatan, Output Bukti, Status.</p>
+        </button>
+      </div>
+    </div>
+  </div>`;
+}
+
+window.downloadCSV = async function(type) {
+  const monthVal = document.getElementById('export-month').value;
+  if (!monthVal) return alert("Pilih bulan terlebih dahulu!");
+
+  alert(`Memproses data ${type} untuk bulan ${monthVal}. File akan otomatis terunduh saat selesai.`);
+
+  try {
+    let csvContent = "";
+    const currentDomain = window.location.origin + window.location.pathname;
+
+    if (type === 'agenda') {
+      const q = window.query(window.collection(window.db, "gaspol_schedules"));
+      const snap = await window.getDocs(q);
+      
+      csvContent += "Tgl Input,Nama Agenda,Tanggal Agenda,Divisi Hadir,Peserta Hadir,Notulensi Agenda,Foto Dokumentasi 1,Foto Dokumentasi 2\n";
+      
+      snap.forEach(doc => {
+        const s = doc.data();
+        if (s.tanggal.startsWith(monthVal)) {
+          const inputDate = new Date(parseInt(s.id.substring(1))).toLocaleDateString('id-ID');
+          const divStr = s.divisi ? s.divisi.join(' | ') : '';
+          const usrStr = s.users ? s.users.join(' | ') : '';
+          const notulensiLink = s.notulensi ? `${currentDomain}?viewNotulensi=${s.id}` : 'Belum Ada';
+          const foto1 = (s.dokumentasi && s.dokumentasi[0]) ? s.dokumentasi[0] : '-';
+          const foto2 = (s.dokumentasi && s.dokumentasi[1]) ? s.dokumentasi[1] : '-';
+
+          const row = `"${inputDate}","${escCSV(s.nama)}","${s.tanggal}","${divStr}","${usrStr}","${notulensiLink}","${foto1}","${foto2}"`;
+          csvContent += row + "\n";
+        }
+      });
+    } else if (type === 'task') {
+      const q = window.query(window.collection(window.db, "gaspol_tasks"));
+      const snap = await window.getDocs(q);
+      
+      csvContent += "Tgl Input,Nama Tugas,Detail Tugas,Link Referensi,Deadline,Divisi,PIC,Keterangan Progres,Hambatan,Output (Bukti Kerja),Status\n";
+
+      snap.forEach(doc => {
+        const t = doc.data();
+        const tDate = t.inputDate || t.deadline; 
+        if (tDate && tDate.startsWith(monthVal)) {
+          const inputDate = t.inputDate ? fmtDate(t.inputDate) : new Date(parseInt(t.id.substring(1))).toLocaleDateString('id-ID');
+          const divStr = t.divisi ? t.divisi.join(' | ') : '';
+          const picStr = t.pic ? t.pic.join(' | ') : '';
+          const status = t.done ? 'Done' : 'Belum Selesai';
+
+          const row = `"${inputDate}","${escCSV(t.name)}","${escCSV(t.desc)}","${t.taskLink || '-'}","${t.deadline}","${divStr}","${picStr}","${escCSV(t.progressDetail)}","${escCSV(t.obstacle)}","${t.proofLink || '-'}","${status}"`;
+          csvContent += row + "\n";
+        }
+      });
+    }
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `GASPOL_${type}_${monthVal}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+  } catch (err) {
+    console.error(err);
+    alert("Gagal menarik data dari server.");
+  }
+}
+
+function escCSV(text) {
+  if (!text) return '';
+  return text.toString().replace(/"/g, '""').replace(/\n/g, ' '); 
+}
 
 function mountApp(){
   if(!state.currentUser){ renderLogin(); return; }
