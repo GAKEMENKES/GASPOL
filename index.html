@@ -97,86 +97,171 @@
 <div id="root" class="opacity-100 scale-100"></div>
 
 <script type="module">
-  // 1. Import Firebase SDK (Versi 9/10 Modular)
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
-  import { 
-    getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc 
-  } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+  import { initializeApp } 
+  from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
 
-  // 2. Masukkan Firebase Config Anda di sini
-  const firebaseConfig = {
-  apiKey: "AIzaSyCcBy3hwZYTRipHf0XWwiq692KmYwfYqAs",
-  authDomain: "gaspol-25282.firebaseapp.com",
-  projectId: "gaspol-25282",
-  storageBucket: "gaspol-25282.firebasestorage.app",
-  messagingSenderId: "978835065624",
-  appId: "1:978835065624:web:11c30370f8aa391ee46c6d"
+import {
+  getDatabase,
+  ref,
+  set,
+  get,
+  onValue,
+  remove,
+  child,
+  update,
+  query,
+  orderByChild,
+  equalTo
+} from "https://www.gstatic.com/firebasejs/10.8.1/firebase-database.js";
+
+import {
+  getAuth,
+  signInWithEmailAndPassword,
+  signOut,
+  createUserWithEmailAndPassword,
+  updateEmail,
+  updatePassword,
+  reauthenticateWithCredential,
+  EmailAuthProvider
+} from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";  
+
+const firebaseConfig = {
+  apiKey: "AIzaSyCM4nbIfVKGyjz9TLIARrwri3TfhcHGyV0",
+  authDomain: "gaspol-1a562.firebaseapp.com",
+  databaseURL: "https://gaspol-1a562-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "gaspol-1a562",
+  storageBucket: "gaspol-1a562.firebasestorage.app",
+  messagingSenderId: "633117167746",
+  appId: "1:633117167746:web:0b49f0430e7b4c76eba49b"
 };
 
-  // 3. Inisialisasi Firebase
   const app = initializeApp(firebaseConfig);
-  const db = getFirestore(app);
+const rtdb = getDatabase(app);
+const auth = getAuth(app);
 
-  // 4. Konfigurasi Cloudinary
+// Pastikan EmailAuthProvider dan fungsi pendukung lainnya di-expose ke window
+window.auth = auth;
+window.rtdb = rtdb;
+window.ref = ref;
+window.get = get;
+window.child = child;
+window.query = query;
+window.orderByChild = orderByChild;
+window.equalTo = equalTo;
+window.signInWithEmailAndPassword = signInWithEmailAndPassword;
+window.signOut = signOut;
+window.createUserWithEmailAndPassword = createUserWithEmailAndPassword;
+
+// 👇 TAMBAHKAN BARIS INI AGAR ERROR HILANG 👇
+window.EmailAuthProvider = EmailAuthProvider;
+window.reauthenticateWithCredential = reauthenticateWithCredential;
+window.updateEmail = updateEmail;
+window.updatePassword = updatePassword;
+
   window.CLOUDINARY_URL = "https://api.cloudinary.com/v1_1/i44xkscy/image/upload";
-  window.CLOUDINARY_PRESET = "GASPOL"; // Pastikan Unsigned
+  window.CLOUDINARY_PRESET = "GASPOL"; 
 
-  // 5. Expose Firebase ke global window agar bisa diakses script lama Anda
-  window.db = db;
-  window.doc = doc;
-  window.setDoc = setDoc;
-  window.deleteDoc = deleteDoc;
-  window.collection = collection;
+  window.rtdb = rtdb;
+  window.ref = ref;
+  window.set = set;
+  window.get = get;
+  window.onValue = onValue;
+  window.remove = remove;
+  window.child = child;
+  window.update = update;
+window.auth = auth;
 
-  const activeTasksQuery = window.query(window.collection(db, "gaspol_tasks"), window.where("isArchived", "==", false));
-  window.onSnapshot(activeTasksQuery, (snapshot) => {
-    window.tasks = [];
+window.signInWithEmailAndPassword =
+  signInWithEmailAndPassword;
+
+window.signOut =
+  signOut;
+
+window.createUserWithEmailAndPassword =
+  createUserWithEmailAndPassword;
+
+
+
+  // Menggunakan query untuk memfilter data langsung dari server Firebase
+const tasksQuery = query(ref(rtdb, "gaspol_tasks"), orderByChild("isArchived"), equalTo(false));
+
+onValue(tasksQuery, (snapshot) => {
+  window.tasks = [];
+  const data = snapshot.val();
+  if (data) {
     const todayNum = new Date().getTime();
-    
-    snapshot.forEach((doc) => {
-      let t = doc.data();
+    Object.keys(data).forEach((key) => {
+      let t = data[key];
+      t.divisi = t.divisi || [];
+      t.pic = t.pic || [];
+
+      // Logika auto-archive tetap berjalan, tapi beban download server sudah jauh berkurang
       if (t.done && t.doneDate) {
         const doneDateNum = new Date(t.doneDate + 'T00:00:00').getTime();
         const diffDays = Math.round((todayNum - doneDateNum) / 86400000);
         if (diffDays >= 3) {
           t.isArchived = true;
-          window.setDoc(window.doc(window.db, "gaspol_tasks", t.id), t);
+          set(ref(rtdb, "gaspol_tasks/" + t.id), t);
           return; 
         }
       }
       window.tasks.push(t);
     });
+  }
+  if(window.state && window.state.currentUser) { if(typeof renderTabContent === 'function') renderTabContent(); }
+});
+
+  // Real-Time Listener Schedules (RTDB) - VERSI OPTIMASI BANDWIDTH
+  const schedulesQuery = query(ref(rtdb, "gaspol_schedules"), orderByChild("isArchived"), equalTo(false));
+
+  onValue(schedulesQuery, (snapshot) => {
+    window.schedules = [];
+    const data = snapshot.val();
+    if (data) {
+      const todayNum = new Date().getTime();
+      Object.keys(data).forEach((key) => {
+        let s = data[key];
+        
+        s.divisi = s.divisi || [];
+        s.users = s.users || [];
+        s.dokumentasi = s.dokumentasi || [];
+
+        // --- UBAH LOGIKA AUTO-ARCHIVE MENJADI SEPERTI INI ---
+        // Gunakan doneDate (jika ada) sebagai patokan hitung mundur 3 hari
+        if (s.status === 'Done' || s.status === 'Canceled') {
+          const refDateStr = s.doneDate ? s.doneDate : s.tanggal;
+          const refDateNum = new Date(refDateStr + 'T00:00:00').getTime();
+          const diffDays = Math.round((todayNum - refDateNum) / 86400000);
+          if (diffDays >= 3) {
+            s.isArchived = true;
+            set(ref(rtdb, "gaspol_schedules/" + s.id), s);
+            return; // Hentikan proses render
+          }
+        }
+        // ----------------------------------------------------
+
+        window.schedules.push(s);
+      });
+    }
     if(window.state && window.state.currentUser) { if(typeof renderTabContent === 'function') renderTabContent(); }
   });
 
-  const activeSchedulesQuery = window.query(window.collection(db, "gaspol_schedules"), window.where("isArchived", "==", false));
-  window.onSnapshot(activeSchedulesQuery, (snapshot) => {
-    window.schedules = [];
-    const todayNum = new Date().getTime();
-    
-    snapshot.forEach((doc) => {
-      let s = doc.data();
-      if (s.status === 'Done' || s.status === 'Canceled') {
-        const agendaDateNum = new Date(s.tanggal + 'T00:00:00').getTime();
-        const diffDays = Math.round((todayNum - agendaDateNum) / 86400000);
-        if (diffDays >= 3) {
-          s.isArchived = true;
-          window.setDoc(window.doc(window.db, "gaspol_schedules", s.id), s);
-          return; 
-        }
-      }
-      window.schedules.push(s);
-    });
-    if(window.state && window.state.currentUser) { if(typeof renderTabContent === 'function') renderTabContent(); }
+  // 👇 TAMBAHKAN BLOK KODE INI DI BAWAHNYA 👇
+  // Real-Time Listener Users (RTDB)
+  onValue(ref(rtdb, "gaspol_users"), (snapshot) => {
+    window.USERS = [];
+    const data = snapshot.val();
+    if (data) {
+      Object.keys(data).forEach((key) => {
+        window.USERS.push(data[key]);
+      });
+    }
+    // Render ulang jika tab task sedang aktif
+    if(window.state && window.state.currentUser) { 
+      if(typeof renderTabContent === 'function') renderTabContent(); 
+    }
   });
-window.db = db;
-window.doc = doc;
-window.setDoc = setDoc;
-window.deleteDoc = deleteDoc;
-window.collection = collection;
-window.getDocs = getDocs; // BARU
-window.query = query;     // BARU
-window.where = where;     // BARU
+  
 </script>
 
 <script>
@@ -209,52 +294,44 @@ function cx(){ return Array.from(arguments).filter(Boolean).join(' '); }
 function esc(s){ return (s||'').replace(/"/g,'&quot;'); }
 
 const DIVISIONS = [ "Direktorat SDMPP", "SDM", "Diklat", "Direktorat PKLO", "Keuangan", "GA", "IT", "Operasional & Marketing", "Direktorat Yanmed", "Keperawatan", "Medis", "Penunjang Medis" ];
+
+const REGISTER_JOBS = [
+  { jabatan: "Master Admin", divisi: "Administrasi", role: "admin" },
+  { jabatan: "Sekretaris Direksi", divisi: "Sekretariat Direksi", role: "admin" },
+
+  { jabatan: "Direktur Utama", divisi: "Direktur Utama", role: "user" },
+  { jabatan: "Direktur SDM, Pendidikan, dan Penelitian", divisi: "Direktorat SDMPP", role: "user" },
+  { jabatan: "Direktur Keuangan, Perencanaan, dan Layanan Operasional", divisi: "Direktorat PKLO", role: "user" },
+  { jabatan: "Direktur Pelayanan Medik", divisi: "Direktorat Yanmed", role: "user" },
+
+  { jabatan: "Manajer Umum dan Rumah Tangga", divisi: "GA", role: "user" },
+  { jabatan: "Asisten Manajer Tata Usaha dan Rumah Tangga", divisi: "GA", role: "user" },
+
+  { jabatan: "Manajer Operasional & Marketing", divisi: "Operasional & Marketing", role: "user" },
+  { jabatan: "Asisten Manajer Marketing", divisi: "Operasional & Marketing", role: "user" },
+
+  { jabatan: "Asisten Manajer Perencanaan dan Perbendaharaan", divisi: "Keuangan", role: "user" },
+  { jabatan: "Asisten Manajer Akuntansi dan BMN", divisi: "Keuangan", role: "user" },
+
+  { jabatan: "Asisten Manajer Jaringan dan Infrastruktur", divisi: "IT", role: "user" },
+  { jabatan: "Asisten Manajer Sistem Informasi Rumah Sakit", divisi: "IT", role: "user" },
+
+  { jabatan: "Manajer SDM", divisi: "SDM", role: "user" },
+  { jabatan: "Manajer Pendidikan dan Pelatihan", divisi: "Diklat", role: "user" },
+
+  { jabatan: "Manajer Penunjang Medis", divisi: "Penunjang Medis", role: "user" },
+  { jabatan: "Manajer Medis", divisi: "Medis", role: "user" },
+  { jabatan: "Manajer Keperawatan", divisi: "Keperawatan", role: "user" }
+];
+
 const HIERARCHY = { "Direktorat SDMPP": [ "SDM", "Diklat" ], "Direktorat PKLO": [ "Keuangan", "GA", "IT", "Operasional & Marketing" ], "Direktorat Yanmed": [ "Keperawatan", "Medis", "Penunjang Medis" ] };
 
-const ADMIN_USERS = [
-  { id:"admin1", name:"Bagus Surya Batara", role:"admin", title:"Master Admin", email:"admin1@gmail.com", password:"BSB19022003" },
-  { id:"admin2", name:"Fransisca Wahyu Anggraini", role:"admin", title:"Sekretaris Direksi", email:"admin2@gmail.com", password:"FWA30061998" }
-];
-const USERS = [
-  { id:"u1", name:"Martha Muliana Lumogom Siahaan", divisi:"Direktur Utama", jabatan:"Direktur Utama", email:"user1@gmail.com", password:"MSI21061970"},
-  { id:"u2", name:"Warno Hidayat", divisi:"Direktorat SDMPP", jabatan:"Direktur SDM, Pendidikan, dan Penelitian", email:"user2@gmail.com", password:"WHI16031968"},
-  { id:"u3", name:"Dani Indrawan", divisi:"Direktorat PKLO", jabatan:"Direktur Keuangan, Perencanaan, dan Layanan Operasional", email:"user3@gmail.com", password:"DI26081980"},
-  { id:"u4", name:"Adhy Nugroho", divisi:"Direktorat Yanmed", jabatan:"Direktur Pelayanan Medik", email:"user4@gmail.com", password:"AN01021981"},
-  { id:"u7", name:"Sammy Santoso", divisi:"GA", jabatan:"Manajer Umum dan Rumah Tangga", email:"user7@gmail.com", password:"SS18011966"},
-  { id:"u10", name:"Ipit Winarni", divisi:"GA", jabatan:"Asisten Manajer Tata Usaha dan Rumah Tangga", email:"user8@gmail.com", password:"IW10081978"},
-  { id:"u8", name:"Kencana Widyastuti Carbite", divisi:"Operasional & Marketing", jabatan:"Manajer Operasional & Marketing", email:"user8@gmail.com", password:"KWC24091973"},
-  { id:"u9", name:"Jesaya Afriyanta", divisi:"Operasional & Marketing", jabatan:"Asisten Manajer Marketing", email:"user8@gmail.com", password:"JSA07041990"},
-  { id:"u11", name:"Wahyu Hari Imawan", divisi:"Keuangan", jabatan:"Asisten Manajer Perencanaan dan Perbendaharaan", email:"user8@gmail.com", password:"WH08081979"},
-  { id:"u12", name:"Tara Ruci Karyana Murti", divisi:"Keuangan", jabatan:"Asisten Manajer Akuntansi dan BMN", email:"user8@gmail.com", password:"TRU20111987"},
-  { id:"u13", name:"Arga Lancana Yuananda", divisi:"IT", jabatan:"Asisten Manajer Jaringan dan Infrastruktur", email:"user8@gmail.com", password:"ALY11051995"},
-  { id:"u14", name:"Arianti Febe Rofitasari", divisi:"IT", jabatan:"Asisten Manajer Sistem Informasi Rumah Sakit", email:"user8@gmail.com", password:"AFR25021985"},
-  { id:"u5", name:"Luhputu Agustinawati", divisi:"SDM", jabatan:"Manajer SDM", email:"user5@gmail.com", password:"LPA25081981"},
-  { id:"u6", name:"RA Adaninggar Primadia. N", divisi:"Diklat", jabatan:"Manajer Pendidikan dan Pelatihan", email:"user6@gmail.com", password:"07071984"},
-  { id:"u15", name:"Erni Rosnawati Rusmana", divisi:"Penunjang Medis", jabatan:"Manajer Penunjang Medis", email:"user8@gmail.com", password:"ERR02021976"},
-  { id:"u16", name:"Acitta Raras Wimala", divisi:"Medis", jabatan:"Manajer Medis", email:"user8@gmail.com", password:"ARW21091988"},
-  { id:"u17", name:"Rini Ernawati", divisi:"Keperawatan", jabatan:"Manajer Keperawatan", email:"user8@gmail.com", password:"RE09091979"},
-];
+
 
 // Variabel akan diisi otomatis oleh onSnapshot Firebase dari Langkah 2
 window.tasks = window.tasks || [];
 window.schedules = window.schedules || [];
-
-// Fungsi saveData diubah menjadi async untuk push data ke Firestore
-window.saveData = async function() {
-  try {
-    // Karena arsitektur lama Anda mengedit array langsung lalu memanggil saveData(),
-    // kita loop array-nya dan pastikan sinkron ke Firestore.
-    // (Cara ini aman untuk transisi cepat dari localStorage ke Firebase)
-    for (const t of tasks) {
-      await window.setDoc(window.doc(window.db, "gaspol_tasks", t.id), t);
-    }
-    for (const s of schedules) {
-      await window.setDoc(window.doc(window.db, "gaspol_schedules", s.id), s);
-    }
-  } catch (error) {
-    console.error("Error saving data to Firebase:", error);
-  }
-}
+window.USERS = window.USERS || []; // Tambahkan baris ini
 
 const TASK_STATUS_STYLE = {
   "On Progress": { chip:"bg-slate-100 text-slate-600", dot:"bg-slate-400", bar:"bg-slate-400", hex:"#94a3b8" },
@@ -265,10 +342,11 @@ const TASK_STATUS_STYLE = {
 };
 const SCHEDULE_STATUS_STYLE = {
   Scheduled:"bg-slate-100 text-slate-600",
+  Live:"bg-blue-100 text-blue-700 font-bold border border-blue-200 animate-pulse shadow-sm", // <--- TAMBAHAN STATUS LIVE
   Done:"bg-evergreen-light/50 text-evergreen-dark",
   Canceled:"bg-rose-50 text-rose-500",
   Reschedule:"bg-amber-50 text-amber-700",
-  Hold:"bg-purple-100 text-purple-700 font-bold", // Tambahan Hold
+  Hold:"bg-purple-100 text-purple-700 font-bold",
 };
 
 function getDivisionStats(taskList){
@@ -348,8 +426,7 @@ function getDivisionStats(taskList){
   return Object.keys(stats).map(d => ({ divisi: d, ...stats[d] }));
 }
 
-// UPDATE JUGA FUNGSI ADD TASK AGAR MENYIMPAN TANGGAL INPUT
-window.submitEditTask = function(e, id) {
+window.submitEditTask = async function(e, id) {
   e.preventDefault();
   const t = tasks.find(x => x.id === id);
   if (t) {
@@ -358,12 +435,10 @@ window.submitEditTask = function(e, id) {
     t.deadline = document.getElementById('et-deadline').value;
     t.deadlineTime = document.getElementById('et-waktu').value;
     t.taskLink = document.getElementById('et-link').value.trim();
-
     t.revisedDate = toISO(today); 
-    saveData();
+    await window.set(window.ref(window.rtdb, "gaspol_tasks/" + id), t);
   }
   closeModal();
-  renderTabContent();
   setTimeout(() => alert("Tugas berhasil direvisi!"), 200);
   return false;
 };
@@ -375,19 +450,29 @@ let state = {
   activeTab: 'home',
   modal: null,
   scheduleFilters: { start:'', end:'', minggu:'', nama:'', divisi:'', status:'' },
-  taskFilters: { start:'', end:'', nama:'', status:'', divisi:'', pic:'' },
-  taskFilters: { tanggal:'', nama:'', status:'', divisi:'', user:'' },
+  taskFilters: {
+    start: '',
+    end: '',
+    nama: '',
+    status: '',
+    divisi: '',
+    pic: ''
+  },
   notulensiMenuId: null,
   addTaskDivisi: new Set(),
+  addTaskUsers: new Set(),
   addTaskPic: new Set(),
   addScheduleDivisi: new Set(),
   addScheduleUsers: new Set(),
   notulensiDraft: '',
   selectedDate: null,
-tempTasks: [], // Untuk menampung sementara tugas dari teks yang diblok
+  tempTasks: [], // Untuk menampung sementara tugas dari teks yang diblok
   activeTempTaskId: null,
-taskCounter: 0, 
+  taskCounter: 0, 
 };
+
+// Expose state ke window (Harus berada di luar kurung kurawal state)
+window.state = state;
 
 function icon(name, cls){ return `<i data-lucide="${name}" class="${cls||''}"></i>`; }
 function refreshIcons(){ if(window.lucide) lucide.createIcons(); }
@@ -429,7 +514,7 @@ window.updateDivisiSelectedText = function() {
     textEl.classList.add('text-gray-400');
     textEl.classList.remove('text-gray-800');
   } else if (state.addScheduleDivisi.size === DIVISIONS.length) {
-    textEl.textContent = 'Semua Divisi Terpilih (' + DIVISIONS.length + ')';
+    textEl.textContent = 'All Leader'; // <--- BERUBAH JADI ALL LEADER
     textEl.classList.remove('text-gray-400');
     textEl.classList.add('text-evergreen-dark', 'font-semibold');
   } else {
@@ -535,12 +620,86 @@ window.handleUserCheck = function(cb) {
 function openModal(type, payload){ state.modal = { type, payload }; renderModal(); }
 window.closeModal = function(){ state.modal = null; state.notulensiMenuId = null; renderModal(); };
 
+window.submitEditProfile = async function(e) {
+  e.preventDefault();
+  const btn = document.getElementById('btn-submit-ep');
+  const originalText = btn.innerHTML;
+  btn.innerHTML = 'Menyimpan...';
+  btn.disabled = true;
+
+  const oldPass = document.getElementById('ep-old-password').value;
+  const newEmail = document.getElementById('ep-email').value.trim();
+  const newPass = document.getElementById('ep-new-password').value;
+
+  try {
+    const user = window.auth.currentUser;
+    if (!user) throw new Error("Tidak ada sesi user aktif.");
+
+    // Autentikasi ulang (wajib dari Firebase untuk edit kredensial sensitif)
+    const credential = window.EmailAuthProvider.credential(user.email, oldPass);
+    await window.reauthenticateWithCredential(user, credential);
+
+    let updatePromises = [];
+    let emailChanged = false;
+
+    if (newEmail !== user.email) {
+      updatePromises.push(window.updateEmail(user, newEmail));
+      emailChanged = true;
+    }
+    if (newPass) {
+      updatePromises.push(window.updatePassword(user, newPass));
+    }
+
+    if (updatePromises.length > 0) await Promise.all(updatePromises);
+
+    // Update data di Realtime Database jika email berubah
+    if (emailChanged) {
+      state.currentUser.email = newEmail;
+      await window.set(window.ref(window.rtdb, "gaspol_users/" + state.currentUser.id + "/email"), newEmail);
+    }
+
+    alert("Profil akun berhasil diperbarui!");
+    closeModal();
+    document.getElementById('topbar').innerHTML = renderTopBar(); // Refresh UI
+  } catch (error) {
+    console.error(error);
+    if (error.code === 'auth/invalid-credential') alert("Gagal: Password Lama yang Anda masukkan salah!");
+    else if (error.code === 'auth/email-already-in-use') alert("Gagal: Email baru tersebut sudah digunakan.");
+    else alert("Gagal memperbarui profil: " + error.message);
+  } finally {
+    btn.innerHTML = originalText;
+    btn.disabled = false;
+  }
+  return false;
+};
+
 function renderModal(){
   const root = document.getElementById('modal-root');
   if(!state.modal){ root.innerHTML=''; return; }
   const { type, payload } = state.modal;
   
   let title = '', body = '', wide = false, fullScreen = false;
+
+if (type === 'editProfile') {
+    title = 'Edit Profil Akun';
+    body = `
+      <form onsubmit="return submitEditProfile(event)">
+        <div class="mb-4 p-3 bg-blue-50 border border-blue-100 rounded-xl text-xs text-blue-700 leading-relaxed shadow-sm">
+          <p>Untuk alasan keamanan, perubahan Email atau Password membutuhkan <b>Password Lama</b> Anda sebagai alat verifikasi.</p>
+        </div>
+        <label class="block mb-4"><span class="block text-sm font-medium text-gray-600 mb-1.5">Email Baru (Opsional jika tidak diganti)</span>
+          <input id="ep-email" type="email" class="field-input text-sm" value="${state.currentUser.email}" required /></label>
+        <label class="block mb-4"><span class="block text-sm font-medium text-gray-600 mb-1.5">Password Lama (Wajib Diisi)</span>
+          <input id="ep-old-password" type="password" class="field-input text-sm" placeholder="Masukkan password akun Anda saat ini..." required /></label>
+        <label class="block mb-6"><span class="block text-sm font-medium text-gray-600 mb-1.5">Password Baru (Opsional)</span>
+          <input id="ep-new-password" type="password" class="field-input text-sm" placeholder="Kosongkan jika tidak ingin ganti password" minlength="6" /></label>
+        <div class="flex justify-end gap-3 pt-4 border-t border-gray-100">
+          <button type="button" class="btn-ghost" onclick="closeModal()">Batal</button>
+          <button type="submit" id="btn-submit-ep" class="px-5 py-2.5 rounded-xl bg-blue-500 text-white font-bold hover:bg-blue-600 transition-all shadow-md flex items-center gap-2">${icon('save', 'w-4 h-4')} Simpan Perubahan</button>
+        </div>
+      </form>
+    `;
+  }
 
   if(type === 'statDetail') {
     const mode = payload; wide = true;
@@ -870,7 +1029,7 @@ function renderModal(){
       <div class="space-y-3 text-sm">
         <div class="flex items-center gap-2 text-gray-600">${icon('calendar-clock','w-4 h-4 text-evergreen-dark')} ${fmtDate(s.tanggal)} • ${s.waktu}</div>
         <div class="flex items-center gap-2 text-gray-600">${icon('map-pin','w-4 h-4 text-evergreen-dark')} ${s.lokasi || '-'}</div>
-        ${s.isHybrid && s.zoomLink ? `<div class="flex items-center gap-2 text-blue-600">${icon('link','w-4 h-4')} <a href="${s.zoomLink}" target="_blank" class="hover:underline font-bold">Link Daring (Zoom/Meet)</a></div>` : ''}
+        ${s.refLink ? `<div class="flex items-center gap-2 text-blue-600">${icon('link','w-4 h-4')} <a href="${s.refLink}" target="_blank" class="hover:underline font-bold">Buka Link Referensi / Materi</a></div>` : ''}
         
         <div><p class="text-xs text-gray-400 mb-1.5 flex items-center gap-1">${icon('building-2','w-3.5 h-3.5')} Divisi Terlibat</p>
           <div class="flex flex-wrap gap-1.5">${s.divisi.map(d=>`<span class="px-2.5 py-1 rounded-full bg-evergreen-light/40 text-evergreen-dark text-xs font-medium">${d}</span>`).join('')}</div></div>
@@ -1043,15 +1202,8 @@ function renderModal(){
           </label>
         </div>
 
-        <div class="mb-5 p-3 border border-evergreen-light/50 bg-evergreen-light/20 rounded-xl">
-          <label class="flex items-center gap-2 cursor-pointer mb-2">
-            <input type="checkbox" id="as-hybrid" onchange="toggleZoomInput(this.checked)" class="w-4 h-4 text-evergreen-dark rounded border-gray-300 focus:ring-evergreen" />
-            <span class="text-sm font-bold text-evergreen-dark">Agenda Hybrid / Daring (Online)</span>
-          </label>
-          <div id="zoom-container" style="display:none;">
-            <input id="as-zoom" type="url" class="field-input text-sm bg-white mt-2" placeholder="Masukkan link Zoom atau Google Meet di sini..." />
-          </div>
-        </div>
+       <label class="block mb-5"><span class="block text-sm font-medium text-gray-600 mb-1.5">Link Referensi/Materi (Opsional)</span>
+          <input id="as-link" type="url" class="field-input text-sm" placeholder="Contoh: Link GDrive, PPT, PDF materi rapat..." /></label>
 
         <div class="block mb-5">
           <label class="block"><span class="block text-sm font-medium text-gray-600 mb-1.5">Lokasi (Offline) / Keterangan Tempat</span>
@@ -1210,7 +1362,7 @@ function renderModal(){
           <h3 class="${fullScreen ? 'text-xl' : 'text-lg'} font-bold text-gray-800">${title}</h3>
           <button onclick="closeModal()" class="p-2 rounded-full text-gray-400 hover:bg-rose-50 hover:text-rose-500 transition-all">${icon('x','w-5 h-5')}</button>
         </div>
-        <div class="${fullScreen ? 'flex-1 overflow-hidden flex flex-col' : 'max-h-[88vh] overflow-y-auto'}">
+        <div class="${fullScreen ? 'flex-1 overflow-hidden flex flex-col' : 'max-h-[88vh] overflow-y-auto p-1'}">
           ${body}
         </div>
       </div>
@@ -1218,118 +1370,167 @@ function renderModal(){
   refreshIcons();
 }
 /* Modal Actions */
-window.markTaskDone = function(id){ 
+window.markTaskDone = async function(id){ 
   const t = tasks.find(x=>x.id===id); 
-  if(t){ t.done=true; t.doneDate=toISO(today); saveData(); } 
-  closeModal(); renderTabContent(); 
+  if(t){ 
+    t.done = true; 
+    t.doneDate = toISO(today); 
+    await window.set(window.ref(window.rtdb, "gaspol_tasks/" + id), t); 
+  } 
+  closeModal(); 
 };
 
-window.updateScheduleStatus = function(id, status){
+window.updateScheduleStatus = async function(id, status){
   const s = schedules.find(x=>x.id===id); 
-  if(s) { s.status = status; saveData(); }
-  if(state.modal && state.modal.payload && state.modal.payload.id === id){ state.modal.payload.status = status; renderModal(); }
-  renderTabContent();
+  if(s) { 
+    s.status = status; 
+    await window.set(window.ref(window.rtdb, "gaspol_schedules/" + id), s); 
+  }
 };
-
-window.saveNotulensi = function(scheduleId){
+window.saveNotulensi = async function(scheduleId){
   const s = schedules.find(x => x.id === scheduleId);
   if (!s) return;
-  
+
   const editor = document.getElementById('notulensi-editor');
   s.notulensi = editor ? editor.innerHTML : ''; 
-  s.status = 'Done'; 
-  
+  s.status = 'Done';
+s.doneDate = toISO(today); 
+
   let validTasksCount = 0;
-  
   if(state.tempTasks && state.tempTasks.length > 0) {
+    const taskPromises = [];
     state.tempTasks.forEach((t, index) => {
       if(t.name && t.divisi.length > 0 && t.pic.length > 0 && t.deadline) {
-        tasks.unshift({
+        const newTask = {
           id: 't' + Date.now() + index,
           inputDate: toISO(today),
           name: t.name, 
           desc: `Tugas turunan dari hasil rapat: ${s.nama}`, 
-          scheduleRefId: scheduleId, // <--- INI BARIS YANG SEBELUMNYA TERLEWAT
+          scheduleRefId: scheduleId, 
           deadline: t.deadline, 
           deadlineTime: '23:59',
-isArchived: false, 
+          isArchived: false, 
           taskLink: '', 
           divisi: t.divisi, 
           pic: t.pic,    
           done: false, doneDate: null, proofLink: '', progressDetail: '', obstacle: ''
-        });
+        };
+        taskPromises.push(window.set(window.ref(window.rtdb, "gaspol_tasks/" + newTask.id), newTask));
         validTasksCount++;
       }
     });
+    await Promise.all(taskPromises);
   }
 
-  saveData(); 
+  await window.set(window.ref(window.rtdb, "gaspol_schedules/" + s.id), s);
   localStorage.removeItem('gaspol_draft_' + scheduleId); 
-  
   state.tempTasks = [];
   state.activeTempTaskId = null;
-  
   closeModal(); 
-  renderTabContent();
-  
-  if(validTasksCount > 0) {
-    setTimeout(() => alert(`Notulensi disimpan dan ${validTasksCount} Tugas Turunan berhasil didistribusikan!`), 300);
-  } else {
-    setTimeout(() => alert(`Notulensi berhasil disimpan!`), 300);
-  }
+  alert(validTasksCount > 0 ? `Notulensi disimpan & ${validTasksCount} Tugas Turunan didistribusikan!` : `Notulensi berhasil disimpan!`);
 };
 
-window.submitAddSchedule = function(e){
-  e.preventDefault();
-  const nama = document.getElementById('as-nama').value.trim();
-  const tanggal = document.getElementById('as-tanggal').value;
-  const wMulai = document.getElementById('as-waktu-mulai').value;
-  const wSelesai = document.getElementById('as-waktu-selesai').value;
-  const isHybrid = document.getElementById('as-hybrid').checked;
-  const zoomLink = document.getElementById('as-zoom') ? document.getElementById('as-zoom').value.trim() : '';
+/* =========================================================================
+   FUNGSI SUBMIT UNTUK ADD TASK & ADD SCHEDULE (ANTI-RELOAD/TERPENTAL)
+   ========================================================================= */
 
-  // Waktu selesai tidak lagi wajib
-  if(!nama || !tanggal || !wMulai) return false;
+window.submitAddTask = async function(e) {
+  e.preventDefault(); // Mencegah browser melakukan refresh halaman
+  const nama = document.getElementById('at-nama').value.trim();
+  const desk = document.getElementById('at-desk').value.trim();
+  const deadline = document.getElementById('at-deadline').value;
+  const waktu = document.getElementById('at-waktu').value;
+  const link = document.getElementById('at-link') ? document.getElementById('at-link').value.trim() : '';
 
-  // Jika wSelesai kosong, gabungkan dengan "Selesai"
-  const finalWaktu = wSelesai ? `${wMulai} - ${wSelesai}` : `${wMulai} - Selesai`;
+  if(!nama || !desk || !deadline || !waktu) return false;
 
-  const internalNames = Array.from(state.addScheduleUsers).map(id => {
-    const u = USERS.find(x => x.id === id); return u ? u.name : '';
+  // Mapping ID user ke Nama User untuk PIC
+  const picNames = Array.from(state.addTaskUsers).map(id => {
+    const u = window.USERS.find(x => x.id === id); 
+    return u ? u.name : '';
   }).filter(Boolean);
 
-  const additionalInput = document.getElementById('as-users-additional').value;
-  const additionalArray = additionalInput.split(',').map(u => u.trim()).filter(u => u.length > 0);
-  const finalUsers = [...internalNames, ...additionalArray];
-  
-  schedules.unshift({
-    id: 's'+Date.now(), nama, 
-    tanggal, waktu: finalWaktu, lokasi: document.getElementById('as-lokasi').value,
-    isHybrid: isHybrid, zoomLink: zoomLink,
-    divisi: Array.from(state.addScheduleDivisi),
-    users: finalUsers, status: 'Scheduled', notulensi: '',
-isArchived: false,
-  });
-  
-  saveData(); // Simpan ke Local Storage
-  closeModal(); renderTabContent();
+  const newTask = {
+    id: 't' + Date.now(),
+    inputDate: toISO(today),
+    name: nama,
+    desc: desk,
+    deadline: deadline,
+    deadlineTime: waktu,
+    isArchived: false,
+    taskLink: link,
+    divisi: Array.from(state.addTaskDivisi),
+    pic: picNames,
+    done: false, 
+    doneDate: null, 
+    proofLink: '', 
+    progressDetail: '', 
+    obstacle: ''
+  };
+
+  await window.set(window.ref(window.rtdb, "gaspol_tasks/" + newTask.id), newTask);
+  closeModal(); 
   return false;
 };
 
-window.submitReschedule = function(e, id) {
-  e.preventDefault();
-  const s = schedules.find(x => x.id === id);
-  if(s) {
-    s.tanggal = document.getElementById('rs-tanggal').value;
-    const wMulai = document.getElementById('rs-waktu-mulai').value;
-    const wSelesai = document.getElementById('rs-waktu-selesai').value;
-    
-    s.waktu = wSelesai ? `${wMulai} - ${wSelesai}` : `${wMulai} - Selesai`;
-    s.status = 'Scheduled'; 
-    saveData(); 
+window.submitAddSchedule = async function(e) {
+  e.preventDefault(); // Mencegah browser melakukan refresh halaman
+  const nama = document.getElementById('as-nama').value.trim();
+  const tanggal = document.getElementById('as-tanggal').value;
+  const waktuMulai = document.getElementById('as-waktu-mulai').value;
+  const waktuSelesai = document.getElementById('as-waktu-selesai').value;
+  const link = document.getElementById('as-link') ? document.getElementById('as-link').value.trim() : '';
+  const lokasi = document.getElementById('as-lokasi').value.trim();
+  
+  // Perbaikan: Pastikan elemen input ada sebelum mengambil nilainya
+  const usersEl = document.getElementById('as-users-additional');
+  const additionalUsers = usersEl ? usersEl.value.trim() : '';
+
+  if(!nama || !tanggal || !waktuMulai) return false;
+
+const selectedDate = new Date(tanggal + 'T00:00:00');
+  const todayDate = new Date();
+  todayDate.setHours(0,0,0,0); // Reset jam agar perbandingan adil
+  
+  if (selectedDate < todayDate) {
+    alert('Pemberitahuan: Tanggal sudah berlalu. Anda tidak bisa membuat agenda di masa lalu.');
+    return false;
   }
+
+  let waktu = waktuMulai;
+  if (waktuSelesai) waktu += ' - ' + waktuSelesai;
+  else waktu += ' - Selesai';
+
+  // Mapping ID user ke Nama User
+  let picNames = Array.from(state.addScheduleUsers).map(id => {
+    const u = window.USERS.find(x => x.id === id); 
+    return u ? u.name : '';
+  }).filter(Boolean);
+
+  if (additionalUsers) {
+    const arrAdd = additionalUsers.split(',').map(x => x.trim()).filter(Boolean);
+    picNames = [...picNames, ...arrAdd];
+  }
+
+  const newSchedule = {
+    id: 's' + Date.now(),
+    inputDate: toISO(today),
+    nama: nama,
+    tanggal: tanggal,
+    waktu: waktu,
+    lokasi: lokasi,
+    refLink: link,
+    divisi: Array.from(state.addScheduleDivisi),
+    users: picNames,
+    level: 'Operasional', // Default level untuk agenda
+    status: 'Scheduled',
+    notulensi: '',
+    dokumentasi: [],
+    isArchived: false
+  };
+
+  await window.set(window.ref(window.rtdb, "gaspol_schedules/" + newSchedule.id), newSchedule);
   closeModal(); 
-  renderTabContent();
   return false;
 };
 
@@ -1358,35 +1559,84 @@ window.submitEditSchedule = function(e, id) {
    FUNGSI LOGIKA CHECKBOX UNTUK ADD TASK & LAPORAN PROGRES
    ========================================================================= */
 window.toggleAllTaskDivisi = function(cb) {
-  const checkboxes = document.querySelectorAll('.task-divisi-cb');
+
+  const checkboxes = document.querySelectorAll(
+    '#cb-task-select-all ~ * .task-divisi-cb, .task-divisi-cb'
+  );
+
   if (cb.checked) {
-    DIVISIONS.forEach(d => {
-      state.addTaskDivisi.add(d);
-      USERS.filter(u => u.divisi === d).forEach(u => state.addTaskUsers.add(u.id));
-    });
-    checkboxes.forEach(c => c.checked = true);
+
+    // Pilih semua divisi
+    state.addTaskDivisi = new Set(DIVISIONS);
+
+    // Pilih semua user dari seluruh divisi
+    state.addTaskUsers = new Set(
+      USERS.map(u => u.id)
+    );
+
+    // Centang semua checkbox divisi
+    document
+      .querySelectorAll('.task-divisi-cb')
+      .forEach(c => {
+        c.checked = true;
+      });
+
   } else {
+
+    // Bersihkan semua pilihan
     state.addTaskDivisi.clear();
     state.addTaskUsers.clear();
-    checkboxes.forEach(c => c.checked = false);
+
+    document
+      .querySelectorAll('.task-divisi-cb')
+      .forEach(c => {
+        c.checked = false;
+      });
   }
+
+  // Tampilkan seluruh PIC yang sesuai
   renderTaskPesertaCheckboxes();
 };
 
 window.handleTaskDivisiCheck = function(cb) {
+
   const div = cb.value;
-  const selectAllCb = document.getElementById('cb-task-select-all');
+  const selectAllCb =
+    document.getElementById('cb-task-select-all');
 
   if (cb.checked) {
+
     state.addTaskDivisi.add(div);
-    USERS.filter(u => u.divisi === div).forEach(u => state.addTaskUsers.add(u.id));
-    if (selectAllCb && state.addTaskDivisi.size === DIVISIONS.length) selectAllCb.checked = true;
+
+    USERS
+      .filter(u => u.divisi === div)
+      .forEach(u => {
+        state.addTaskUsers.add(u.id);
+      });
+
   } else {
+
     state.addTaskDivisi.delete(div);
-    USERS.filter(u => u.divisi === div).forEach(u => state.addTaskUsers.delete(u.id));
-    if (selectAllCb) selectAllCb.checked = false;
+
+    USERS
+      .filter(u => u.divisi === div)
+      .forEach(u => {
+        state.addTaskUsers.delete(u.id);
+      });
   }
-  renderTaskPesertaCheckboxes(); 
+
+  // Update status checkbox "Pilih Semua"
+  if (selectAllCb) {
+
+    selectAllCb.checked =
+      state.addTaskDivisi.size === DIVISIONS.length;
+
+    selectAllCb.indeterminate =
+      state.addTaskDivisi.size > 0 &&
+      state.addTaskDivisi.size < DIVISIONS.length;
+  }
+
+  renderTaskPesertaCheckboxes();
 };
 
 window.renderTaskPesertaCheckboxes = function() {
@@ -1423,95 +1673,70 @@ window.handleTaskUserCheck = function(cb) {
 };
 
 // Fungsi Simpan Progres Sementara (Tanpa menutup tugas)
-window.saveTaskProgressOnly = function(id) {
+window.saveTaskProgressOnly = async function(id) {
   const t = tasks.find(x => x.id === id);
   if (!t) return;
-  
   const detail = document.getElementById('tp-detail').value.trim();
-  if (!detail) {
-    alert('Keterangan Progres Pengerjaan wajib diisi untuk menyimpan progres!');
-    return;
-  }
-  
+  if (!detail) return alert('Keterangan Progres wajib diisi!');
+
   t.progressDetail = detail;
   t.obstacle = document.getElementById('tp-kendala').value.trim();
   t.proofLink = document.getElementById('tp-link').value.trim();
-  
-  saveData();
-  alert('Progres berhasil disimpan! Admin sudah bisa memantau pembaruan ini.');
-  
+
+  await window.set(window.ref(window.rtdb, "gaspol_tasks/" + id), t);
+  alert('Progres berhasil disimpan!');
   openModal('taskDetail', t); 
-  renderTabContent();
 };
 
 // Fungsi Final Submit (Tugas Selesai)
-window.submitTaskFinal = function(id) {
+window.submitTaskFinal = async function(id) {
   const t = tasks.find(x => x.id === id);
   if (!t) return;
-  
   const detail = document.getElementById('tp-detail').value.trim();
   const link = document.getElementById('tp-link').value.trim();
-  
-  if (!detail) {
-    alert('Keterangan Progres Pengerjaan wajib diisi!');
-    return;
-  }
-  if (!link) {
-    alert('Link Bukti Kerja wajib diisi untuk bisa mensubmit dan menyelesaikan tugas!');
-    return;
-  }
-  
-  const confirmed = confirm('Apakah Anda yakin tugas ini sudah benar-benar selesai? Setelah disubmit, tugas akan dikunci dan dinyatakan Done.');
-  if (!confirmed) return;
-  
+  if (!detail || !link) return alert('Keterangan Progres dan Link Bukti Kerja wajib diisi!');
+
+  if (!confirm('Yakin tugas ini sudah selesai?')) return;
   t.progressDetail = detail;
   t.obstacle = document.getElementById('tp-kendala').value.trim();
   t.proofLink = link;
-  
   t.done = true;
   t.doneDate = toISO(today);
-  
-  saveData();
+
+  await window.set(window.ref(window.rtdb, "gaspol_tasks/" + id), t);
   closeModal();
-  renderTabContent();
 };
 /* =========================================================================
    FUNGSI BARU: SUBMIT EDIT & RESCHEDULE
    ========================================================================= */
-window.submitReschedule = function(e, id) {
+window.submitReschedule = async function(e, id) {
   e.preventDefault();
   const s = schedules.find(x => x.id === id);
   if(s) {
     s.tanggal = document.getElementById('rs-tanggal').value;
     s.waktu = document.getElementById('rs-waktu-mulai').value + ' - ' + document.getElementById('rs-waktu-selesai').value;
-    s.status = 'Scheduled'; // Mereset status menjadi Scheduled
+    s.status = 'Scheduled'; 
+    await window.set(window.ref(window.rtdb, "gaspol_schedules/" + id), s);
   }
   closeModal(); 
-  renderTabContent();
   return false;
 };
 
-window.submitEditSchedule = function(e, id) {
+window.submitEditSchedule = async function(e, id) {
   e.preventDefault();
   const s = schedules.find(x => x.id === id);
   if(s) {
     s.nama = document.getElementById('es-nama').value.trim();
-    
-    // Baca elemen peserta yang TERSISA dari DOM
     const remainingSpans = document.querySelectorAll('#es-current-users span[data-user]');
     let updatedUsers = Array.from(remainingSpans).map(span => span.getAttribute('data-user'));
-    
-    // Tambahkan peserta baru jika ada
     const added = document.getElementById('es-users-add').value;
     if(added.trim()) {
-      const newUsers = added.split(',').map(u => u.trim()).filter(u => u.length > 0);
-      updatedUsers = [...updatedUsers, ...newUsers];
+      updatedUsers = [...updatedUsers, ...added.split(',').map(u => u.trim()).filter(Boolean)];
     }
-    
-    s.users = updatedUsers; // Simpan array terbaru
+    s.users = updatedUsers; 
+    await window.set(window.ref(window.rtdb, "gaspol_schedules/" + id), s);
   }
   closeModal(); 
-  renderTabContent();
   return false;
 };
 
@@ -1540,6 +1765,16 @@ window.startLoginFlow = function() {
 };
 window.showAdminLogin = function() { state.loginType = 'admin'; renderLoginCardContent(); };
 window.showUserLogin = function() { state.loginType = 'user'; renderLoginCardContent(); };
+window.showRegister = function() {
+  state.isRegistering = true;
+  state.loginType = null;
+  renderRegisterCardContent();
+};
+
+window.cancelRegister = function() {
+  state.isRegistering = false;
+  renderLoginCardContent();
+};
 window.cancelLogin = function() { state.loginType = null; renderLoginCardContent(); };
 window.backToLanding = function() {
   state.showLoginForm = false;
@@ -1550,11 +1785,15 @@ window.backToLanding = function() {
   document.getElementById('auth-card').className = "absolute inset-0 z-20 flex flex-col justify-center items-center px-4 transition-all duration-1000 ease-out delay-100 opacity-0 translate-y-24 scale-95 pointer-events-none";
 };
 
+
 window.renderLoginCardContent = function() {
   const cardInner = document.getElementById('auth-card-inner');
   if (!cardInner) return;
   if (!state.loginType) {
-    cardInner.innerHTML = `
+    cardInner.className =
+  "w-full max-w-lg max-h-[90vh] overflow-y-auto p-8 md:p-10 rounded-3xl bg-black/50 backdrop-blur-md border border-white/20 shadow-[0_8px_32px_rgba(0,0,0,0.5)]";
+
+cardInner.innerHTML = `
       <h2 class="text-3xl font-bold text-white mb-2 drop-shadow-md">Pilih Akses</h2>
       <p class="text-gray-300 text-sm mb-8 drop-shadow-md">Silakan pilih peran Anda untuk masuk ke sistem.</p>
       <div class="space-y-4 mb-4 anim-fade">
@@ -1576,20 +1815,40 @@ window.renderLoginCardContent = function() {
           </div>
           ${icon('chevron-right', 'w-5 h-5 text-white/50 group-hover:text-white transition-colors')}
         </button>
+<button
+  onclick="showRegister()"
+  class="w-full group flex items-center justify-between p-4 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-all duration-300 active:scale-[0.98]"
+>
+  <div class="flex items-center gap-4">
+    <div class="w-10 h-10 rounded-full bg-black/40 flex items-center justify-center group-hover:bg-black/60 transition-colors border border-white/10">
+      ${icon('user-plus', 'w-5 h-5 text-white')}
+    </div>
+
+    <p class="font-bold text-white text-sm">
+      Daftar Akun
+    </p>
+  </div>
+
+  ${icon(
+    'chevron-right',
+    'w-5 h-5 text-white/50 group-hover:text-white transition-colors'
+  )}
+</button>
+
       </div>
       <button onclick="backToLanding()" class="text-sm text-gray-400 hover:text-white transition-colors flex items-center gap-1.5 mt-6">
         ${icon('arrow-left', 'w-4 h-4')} Batal
       </button>
     `;
   } else {
-    const title = state.loginType === 'admin' ? 'Admin Access' : 'User Access';
-    const desc = state.loginType === 'admin' ? 'Masukkan kredensial sekretaris direksi.' : 'Masukkan kredensial akun divisi Anda.';
+    const title = state.loginType === 'admin' ? 'Akses Sekretaris' : 'Akses BOD & Manajer';
+    const desc = state.loginType === 'admin' ? 'Masukkan kredensial sekretaris direksi.' : 'Masukkan kredensial akun Anda.';
     cardInner.innerHTML = `
       <h2 class="text-3xl font-bold text-white mb-2 drop-shadow-md">${title}</h2>
       <p class="text-gray-300 text-sm mb-6 drop-shadow-md">${desc}</p>
       <form onsubmit="return submitLogin(event)" class="flex flex-col anim-fade">
         <div class="relative mb-4">
-          <input id="login-name" type="text" class="w-full bg-white/10 border border-white/20 rounded-xl text-white text-sm py-3.5 px-4 focus:outline-none focus:border-white focus:bg-white/20 transition-all placeholder-gray-400 shadow-inner" required placeholder="Username / Nama Lengkap" />
+          <input id="login-name" type="email" class="w-full bg-white/10 border border-white/20 rounded-xl text-white text-sm py-3.5 px-4 focus:outline-none focus:border-white focus:bg-white/20 transition-all placeholder-gray-400 shadow-inner" required placeholder="Email" />
         </div>
         <div class="relative mb-6">
           <input id="login-password" type="password" class="w-full bg-white/10 border border-white/20 rounded-xl text-white text-sm py-3.5 px-4 focus:outline-none focus:border-white focus:bg-white/20 transition-all placeholder-gray-400 shadow-inner" required placeholder="Password" />
@@ -1606,6 +1865,408 @@ window.renderLoginCardContent = function() {
     `;
   }
   refreshIcons();
+};
+
+window.renderRegisterCardContent = function() {
+  const cardInner = document.getElementById('auth-card-inner');
+  if (!cardInner) return;
+
+  cardInner.innerHTML = `
+    <h2 class="text-3xl font-bold text-white mb-2">
+      Daftar Akun
+    </h2>
+
+    <p class="text-gray-300 text-sm mb-6">
+      Silakan isi data untuk membuat akun.
+    </p>
+
+    <form onsubmit="return submitRegister(event)" class="flex flex-col anim-fade">
+
+      <input
+        id="register-name"
+        type="text"
+        required
+        placeholder="Nama Lengkap"
+        class="w-full mb-4 bg-white/10 border border-white/20 rounded-xl text-white text-sm py-3.5 px-4 focus:outline-none"
+      />
+
+      <input
+        id="register-email"
+        type="email"
+        required
+        placeholder="Email"
+        class="w-full mb-4 bg-white/10 border border-white/20 rounded-xl text-white text-sm py-3.5 px-4 focus:outline-none"
+      />
+
+      <div class="relative mb-4">
+
+  <select
+    id="register-jabatan"
+    required
+    onchange="updateRegisterDivisi()"
+    class="appearance-none w-full h-14 bg-[#1f2325] border border-white/20 rounded-xl text-white text-sm px-4 pr-12 focus:outline-none focus:border-evergreen focus:ring-1 focus:ring-evergreen transition-all cursor-pointer"
+  >
+
+    <option value="" disabled selected class="bg-[#1f2325] text-gray-400">
+      Pilih Jabatan
+    </option>
+
+    ${REGISTER_JOBS.map(j => `
+      <option
+        value="${j.jabatan}"
+        class="bg-[#1f2325] text-white"
+      >
+        ${j.jabatan}
+      </option>
+    `).join('')}
+
+  </select>
+
+  <div class="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-gray-400">
+    ${icon('chevron-down', 'w-5 h-5')}
+  </div>
+
+</div>
+
+      <input
+        id="register-divisi"
+        type="text"
+        readonly
+        placeholder="Divisi akan otomatis terisi"
+        class="w-full mb-4 bg-white/10 border border-white/20 rounded-xl text-white text-sm py-3.5 px-4 focus:outline-none opacity-80"
+      />
+
+      <input
+        id="register-password"
+        type="password"
+        required
+        minlength="6"
+        placeholder="Password"
+        class="w-full mb-4 bg-white/10 border border-white/20 rounded-xl text-white text-sm py-3.5 px-4 focus:outline-none"
+      />
+
+      <input
+        id="register-password-confirm"
+        type="password"
+        required
+        minlength="6"
+        placeholder="Konfirmasi Password"
+        class="w-full mb-6 bg-white/10 border border-white/20 rounded-xl text-white text-sm py-3.5 px-4 focus:outline-none"
+      />
+
+      <div class="flex items-center justify-between gap-4 pt-2">
+
+  <button
+    type="button"
+    onclick="cancelRegister()"
+    class="h-12 px-2 text-sm text-gray-400 hover:text-white transition-colors flex items-center gap-2"
+  >
+    ${icon('arrow-left', 'w-4 h-4')}
+    <span>Kembali</span>
+  </button>
+
+  <button
+    type="submit"
+    class="min-w-[130px] h-12 px-5 rounded-xl bg-evergreen text-black text-sm font-bold hover:bg-evergreen-hover transition-all duration-300 active:scale-95 flex items-center justify-center gap-2 shadow-[0_4px_20px_rgba(163,230,53,0.25)]"
+  >
+    <span>Daftar</span>
+    ${icon('user-plus', 'w-4 h-4')}
+  </button>
+
+</div>
+
+    </form>
+  `;
+
+  refreshIcons();
+};
+
+window.submitRegister = async function(e) {
+
+  e.preventDefault();
+
+  const name =
+    document.getElementById('register-name').value.trim();
+
+  const email =
+    document.getElementById('register-email').value.trim();
+
+  const jabatan =
+    document.getElementById('register-jabatan').value;
+
+  const password =
+    document.getElementById('register-password').value;
+
+  const confirmPassword =
+    document.getElementById('register-password-confirm').value;
+
+  const job =
+    REGISTER_JOBS.find(
+      j => j.jabatan === jabatan
+    );
+
+  const btnSubmit =
+    e.target.querySelector('button[type="submit"]');
+
+  const originalText =
+    btnSubmit.innerHTML;
+
+  if (!job) {
+    alert("Silakan pilih jabatan.");
+    return false;
+  }
+
+  if (password !== confirmPassword) {
+    alert("Konfirmasi password tidak sama.");
+    return false;
+  }
+
+  btnSubmit.innerHTML = "Mendaftarkan...";
+  btnSubmit.disabled = true;
+
+  try {
+
+    /*
+     * =====================================================
+     * 1. CEK APAKAH SLOT JABATAN SUDAH TERISI
+     * =====================================================
+     */
+
+    const usersSnapshot =
+      await window.get(
+        window.ref(window.rtdb, "gaspol_users")
+      );
+
+    if (usersSnapshot.exists()) {
+
+      const usersData =
+        usersSnapshot.val();
+
+      const jabatanSudahTerisi =
+        Object.values(usersData).some(
+          user => user.jabatan === jabatan
+        );
+
+      if (jabatanSudahTerisi) {
+
+        alert(
+          `Jabatan "${jabatan}" sudah terdaftar. `
+          + `Setiap jabatan hanya dapat memiliki 1 akun.`
+        );
+
+        btnSubmit.innerHTML = originalText;
+        btnSubmit.disabled = false;
+
+        return false;
+      }
+    }
+
+
+    /*
+     * =====================================================
+     * 2. BUAT AKUN DI FIREBASE AUTHENTICATION
+     * =====================================================
+     */
+
+    const credential =
+      await window.createUserWithEmailAndPassword(
+        window.auth,
+        email,
+        password
+      );
+
+    const firebaseUser =
+      credential.user;
+
+
+    /*
+     * =====================================================
+     * 3. TENTUKAN ROLE
+     * =====================================================
+     */
+
+    const role =
+      (
+        jabatan === "Master Admin" ||
+        jabatan === "Sekretaris Direksi"
+      )
+        ? "admin"
+        : "user";
+
+
+    /*
+     * =====================================================
+     * 4. SIMPAN PROFIL USER KE RTDB
+     * =====================================================
+     */
+
+    const userData = {
+
+      id: firebaseUser.uid,
+
+      uid: firebaseUser.uid,
+
+      name: name,
+
+      email: email,
+
+      divisi: job.divisi,
+
+      jabatan: jabatan,
+
+      role: role,
+
+      title: jabatan,
+
+      createdAt: new Date().toISOString()
+
+    };
+
+
+    await window.set(
+      window.ref(
+        window.rtdb,
+        "gaspol_users/" + firebaseUser.uid
+      ),
+      userData
+    );
+
+
+    /*
+     * =====================================================
+     * 5. LOGOUT DARI FIREBASE AUTH
+     * =====================================================
+     *
+     * User TIDAK langsung masuk ke dashboard.
+     * Setelah daftar selesai, kita kembalikan ke
+     * halaman "Pilih Akses".
+     */
+
+    await window.signOut(window.auth);
+
+
+    /*
+     * =====================================================
+     * 6. RESET STATE LOGIN
+     * =====================================================
+     */
+
+    state.currentUser = null;
+
+    state.isRegistering = false;
+
+    state.loginType = null;
+
+
+    /*
+     * =====================================================
+     * 7. KEMBALI KE HALAMAN "PILIH AKSES"
+     * =====================================================
+     */
+
+    renderLoginCardContent();
+
+
+    /*
+     * =====================================================
+     * 8. BERIKAN NOTIFIKASI
+     * =====================================================
+     */
+
+    setTimeout(() => {
+
+      alert(
+        "Pendaftaran berhasil!\n\n"
+        + "Akun Anda sudah dibuat. "
+        + "Silakan pilih akses dan login menggunakan email "
+        + "serta password yang telah didaftarkan."
+      );
+
+    }, 100);
+
+
+  } catch (error) {
+
+    console.error(
+      "Error registration:",
+      error
+    );
+
+
+    /*
+     * ERROR FIREBASE AUTH
+     */
+
+    if (
+      error.code ===
+      'auth/email-already-in-use'
+    ) {
+
+      alert(
+        "Email tersebut sudah terdaftar."
+      );
+
+    }
+
+    else if (
+      error.code ===
+      'auth/invalid-email'
+    ) {
+
+      alert(
+        "Format email tidak valid."
+      );
+
+    }
+
+    else if (
+      error.code ===
+      'auth/weak-password'
+    ) {
+
+      alert(
+        "Password terlalu lemah. "
+        + "Gunakan minimal 6 karakter."
+      );
+
+    }
+
+    else {
+
+      alert(
+        "Pendaftaran gagal:\n"
+        + error.message
+      );
+
+    }
+
+
+    btnSubmit.innerHTML = originalText;
+    btnSubmit.disabled = false;
+
+  }
+
+  return false;
+};
+
+window.updateRegisterDivisi = function() {
+
+  const jabatan =
+    document.getElementById('register-jabatan').value;
+
+  const job =
+    REGISTER_JOBS.find(
+      j => j.jabatan === jabatan
+    );
+
+  const divisi =
+    document.getElementById('register-divisi');
+
+  if (job) {
+    divisi.value = job.divisi;
+  } else {
+    divisi.value = '';
+  }
 };
 
 function renderLogin(){
@@ -1643,45 +2304,126 @@ function renderLogin(){
   renderLoginCardContent();
 }
 
-window.submitLogin = async function(e){
+window.submitLogin = async function(e) {
   e.preventDefault();
-  const nameInput = document.getElementById('login-name').value;
-  const passInput = document.getElementById('login-password').value;
-  
-  const btnSubmit = e.target.querySelector('button[type="submit"]');
-  const originalText = btnSubmit.innerHTML;
+
+  const emailInput =
+    document.getElementById('login-name').value.trim();
+
+  const passInput =
+    document.getElementById('login-password').value;
+
+  const btnSubmit =
+    e.target.querySelector('button[type="submit"]');
+
+  const originalText =
+    btnSubmit.innerHTML;
+
   btnSubmit.innerHTML = "Memeriksa...";
   btnSubmit.disabled = true;
 
   try {
-    const q = window.query(window.collection(window.db, "gaspol_users"), window.where("name", "==", nameInput));
-    const querySnapshot = await window.getDocs(q);
-    
-    let successUser = null;
-    querySnapshot.forEach((doc) => {
-      const u = doc.data();
-      if (u.password === passInput && u.role === state.loginType) {
-        successUser = u;
-      }
-    });
 
-    if (successUser) {
-      state.currentUser = successUser;
-      const root = document.getElementById('root');
-      root.style.opacity = '0';
-      root.style.transform = 'scale(0.95)';
-      setTimeout(() => { mountApp(); root.style.opacity = '1'; root.style.transform = 'scale(1)'; }, 500);
-    } else {
-      alert('Login Gagal: Nama, Password, atau Akses Role salah!');
+    // LOGIN FIREBASE AUTH
+    const credential =
+      await window.signInWithEmailAndPassword(
+        window.auth,
+        emailInput,
+        passInput
+      );
+
+    const firebaseUser =
+      credential.user;
+
+    // AMBIL DATA PROFIL USER DARI RTDB
+    const dbRef =
+      window.ref(window.rtdb);
+
+    const snapshot =
+      await window.get(
+        window.child(
+          dbRef,
+          "gaspol_users/" + firebaseUser.uid
+        )
+      );
+
+    if (!snapshot.exists()) {
+
+      await window.signOut(window.auth);
+
+      alert(
+        "Akun berhasil login, tetapi profil user belum ditemukan."
+      );
+
       btnSubmit.innerHTML = originalText;
       btnSubmit.disabled = false;
+
+      return false;
     }
+
+    const successUser = snapshot.val();
+
+    // CEK ROLE
+    if (successUser.role !== state.loginType) {
+
+      await window.signOut(window.auth);
+
+      alert(
+        "Akun tidak memiliki akses pada menu ini."
+      );
+
+      btnSubmit.innerHTML = originalText;
+      btnSubmit.disabled = false;
+
+      return false;
+    }
+
+    // LOGIN BERHASIL
+    state.currentUser = successUser;
+
+    const root =
+      document.getElementById('root');
+
+    root.style.opacity = '0';
+    root.style.transform = 'scale(0.95)';
+
+    setTimeout(() => {
+
+      mountApp();
+
+      root.style.opacity = '1';
+      root.style.transform = 'scale(1)';
+
+    }, 500);
+
   } catch (error) {
+
     console.error("Error login:", error);
-    alert("Terjadi kesalahan saat memverifikasi data login.");
+
+    if (
+      error.code === 'auth/invalid-credential'
+    ) {
+
+      alert("Email atau password salah.");
+
+    } else if (
+      error.code === 'auth/invalid-email'
+    ) {
+
+      alert("Format email tidak valid.");
+
+    } else {
+
+      alert(
+        "Login gagal: " +
+        error.message
+      );
+    }
+
     btnSubmit.innerHTML = originalText;
     btnSubmit.disabled = false;
   }
+
   return false;
 };
 
@@ -1702,17 +2444,19 @@ window.logout = function(){
    ========================================================================= */
 function renderTopBar(){
   const cu = state.currentUser;
-  const tabs = [ ['home','Home','home'], ['schedule','Schedule','calendar-days'], ['task','Task','list-checks'] ];
-
-if (cu.role === 'admin') {
-    tabs.push(['export', 'Data Laporan', 'database']);
+  let tabs = [ ['home','Home','home'], ['schedule','Schedule','calendar-days'], ['task','Task','list-checks'] ];
+  
+  // Jika role admin, tambahkan tab Export Data
+  if (cu.role === 'admin') {
+    tabs.push(['export', 'Data', 'database']); // Teks diubah menjadi "Data"
   }
 
   const activeIndex = tabs.findIndex(t => t[0] === state.activeTab);
-  const translateClass = activeIndex === 0 ? 'translate-x-0' : activeIndex === 1 ? 'translate-x-full' : 'translate-x-[200%]';
   const isHome = state.activeTab === 'home';
 
-
+  // Logika ukuran dan pergeseran slider dinamis (untuk 3 tab atau 4 tab)
+  const tabWidthPct = 100 / tabs.length;
+  const sliderStyle = `width: calc(${tabWidthPct}% - 4px); transform: translateX(${activeIndex * 100}%);`;
 
   return `
   <div class="${isHome ? 'absolute top-0 left-0 w-full bg-transparent text-white' : 'sticky top-0 bg-white border-b border-gray-200 text-gray-900'} z-40 px-4 py-4 md:px-8 md:py-5 transition-all duration-500 shadow-sm">
@@ -1725,8 +2469,9 @@ if (cu.role === 'admin') {
         <span class="font-bold text-xl md:text-2xl tracking-wide">GASPOL</span>
       </div>
 
-      <div class="hidden md:flex relative max-w-[400px] w-full ${isHome ? 'bg-white/20 border-white/30' : 'bg-gray-100 border-gray-200'} backdrop-blur-md rounded-full p-1.5 shadow-sm border mx-auto">
-        <div id="tab-slider" class="absolute top-1.5 bottom-1.5 left-1.5 w-[calc(33.333%-4px)] ${isHome ? 'bg-white' : 'bg-white shadow-md'} rounded-full transition-transform duration-500 cubic-bezier(0.4, 0, 0.2, 1) z-0 ${translateClass}"></div>
+      <!-- Max-width sedikit dilebarkan agar 4 tab tidak terlalu berdesakan -->
+      <div class="hidden md:flex relative max-w-[500px] w-full ${isHome ? 'bg-white/20 border-white/30' : 'bg-gray-100 border-gray-200'} backdrop-blur-md rounded-full p-1.5 shadow-sm border mx-auto">
+        <div id="tab-slider" class="absolute top-1.5 bottom-1.5 left-1.5 ${isHome ? 'bg-white' : 'bg-white shadow-md'} rounded-full transition-transform duration-500 cubic-bezier(0.4, 0, 0.2, 1) z-0" style="${sliderStyle}"></div>
         ${tabs.map(([key,label,ic]) => `
           <button onclick="switchTab('${key}')" id="btn-tab-${key}" class="relative z-10 flex-1 flex items-center justify-center gap-2 py-2 rounded-full text-sm font-bold transition-colors duration-300 ${state.activeTab===key ? 'text-gray-900' : (isHome ? 'text-white hover:text-white/80' : 'text-gray-500 hover:text-gray-900')}">
             ${icon(ic,'w-4 h-4')}<span class="hidden md:inline">${label}</span>
@@ -1739,9 +2484,14 @@ if (cu.role === 'admin') {
           <p class="text-sm font-bold leading-tight">${cu.name}</p>
           <p class="text-xs opacity-80 leading-tight mt-0.5">${cu.role==='admin' ? cu.title : cu.jabatan}</p>
         </div>
-        <button onclick="logout()" class="px-5 py-2.5 rounded-full bg-evergreen text-gray-900 font-bold text-sm hover:bg-evergreen-hover hover:scale-105 transition-all duration-300 shadow-[0_4px_16px_rgba(163,230,53,0.4)] flex items-center gap-2" title="Keluar">
-          Logout ${icon('log-out','w-4 h-4')}
-        </button>
+        <div class="flex items-center gap-3 border-l border-gray-300 pl-4 ml-2">
+          <button onclick="openModal('editProfile')" class="p-2.5 rounded-full ${isHome ? 'bg-white/10 text-white hover:bg-white/20' : 'bg-blue-50 text-blue-600 hover:bg-blue-100'} transition-all shadow-sm flex items-center justify-center" title="Edit Profil Email & Password">
+            ${icon('user-cog','w-4.5 h-4.5')}
+          </button>
+          <button onclick="logout()" class="px-5 py-2.5 rounded-full bg-evergreen text-gray-900 font-bold text-sm hover:bg-evergreen-hover hover:scale-105 transition-all duration-300 shadow-[0_4px_16px_rgba(163,230,53,0.4)] flex items-center gap-2" title="Keluar">
+            Logout ${icon('log-out','w-4 h-4')}
+          </button>
+        </div>
       </div>
       
     </div>
@@ -1782,9 +2532,9 @@ window.renderHero = function(role, currentUser) {
 
 window.switchTab = function(tab){ 
   if(state.activeTab === tab) return; 
+  
   state.activeTab = tab; 
   
-  // Render ulang topbar karena tampilannya berbeda (transparan di home, solid di tab lain)
   document.getElementById('topbar').innerHTML = renderTopBar();
   
   const content = document.getElementById('tab-content');
@@ -2136,6 +2886,9 @@ function renderHomeAdmin(){
   const top5 = divisionStats.filter(d => d.type === 'divisi').sort((a,b)=>b.score-a.score).slice(0,5);
   const rankMedal = ['bg-amber-400','bg-slate-300','bg-orange-300'];
 
+  // --- FORMAT TANGGAL BARU (Bulan Lengkap & Update Hari Ini) ---
+  const todayLongStr = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+
   return `
   ${renderHero('admin', state.currentUser)}
   <div id="content-anchor" class="max-w-[90rem] mx-auto px-4 md:px-8 relative z-20 -mt-24 pb-16">
@@ -2143,7 +2896,10 @@ function renderHomeAdmin(){
       
       <div class="flex items-center justify-between mb-4">
         <h2 class="text-2xl font-bold text-gray-800">Ringkasan Eksekutif</h2>
-        <span class="text-sm font-medium text-gray-500 bg-gray-100 px-4 py-1.5 rounded-full">${fmtDate(toISO(today))}</span>
+        <!-- TAMPILAN TANGGAL BARU -->
+        <span class="flex items-center gap-2 text-sm font-bold text-evergreen-dark bg-evergreen-light/30 px-5 py-2 rounded-full border border-evergreen-light shadow-sm">
+          ${icon('calendar', 'w-4 h-4')} ${todayLongStr}
+        </span>
       </div>
 
       <!-- KARTU SEKARANG BISA DIKLIK -->
@@ -2151,11 +2907,13 @@ function renderHomeAdmin(){
         <div class="stat-card bg-slate-800 cursor-pointer hover:scale-[1.02] transition-transform" onclick="openModal('statDetail', 'total')">
           <div class="flex items-center justify-between"><div><p class="text-sm opacity-90 text-white">Total Tugas</p><p class="text-3xl font-bold mt-1 text-white">${total}</p></div><div class="p-2.5 bg-white/10 rounded-xl">${icon('clipboard-list','w-5 h-5 text-white')}</div></div>
         </div>
-        <div class="stat-card bg-slate-600 cursor-pointer hover:scale-[1.02] transition-transform" onclick="openModal('statDetail', 'done')">
-          <div class="flex items-center justify-between"><div><p class="text-sm opacity-90 text-white">Tugas Selesai</p><p class="text-3xl font-bold mt-1 text-white">${done}</p></div><div class="p-2.5 bg-white/10 rounded-xl">${icon('check-circle-2','w-5 h-5 text-white')}</div></div>
+        <!-- KARTU TUGAS SELESAI (Sekarang Hijau) -->
+        <div class="stat-card bg-evergreen text-gray-900 cursor-pointer hover:scale-[1.02] transition-transform" onclick="openModal('statDetail', 'done')">
+          <div class="flex items-center justify-between"><div><p class="text-sm opacity-90 font-bold">Tugas Selesai</p><p class="text-3xl font-bold mt-1">${done}</p></div><div class="p-2.5 bg-black/10 rounded-xl">${icon('check-circle-2','w-5 h-5 text-gray-900')}</div></div>
         </div>
-        <div class="stat-card bg-evergreen text-gray-900 cursor-pointer hover:scale-[1.02] transition-transform" onclick="openModal('statDetail', 'progress')">
-          <div class="flex items-center justify-between"><div><p class="text-sm opacity-90 font-bold">Belum Selesai</p><p class="text-3xl font-bold mt-1">${notDone}</p></div><div class="p-2.5 bg-black/10 rounded-xl">${icon('clock','w-5 h-5 text-gray-900')}</div></div>
+        <!-- KARTU BELUM SELESAI (Sekarang Abu-abu) -->
+        <div class="stat-card bg-slate-600 cursor-pointer hover:scale-[1.02] transition-transform" onclick="openModal('statDetail', 'progress')">
+          <div class="flex items-center justify-between"><div><p class="text-sm opacity-90 text-white">Belum Selesai</p><p class="text-3xl font-bold mt-1 text-white">${notDone}</p></div><div class="p-2.5 bg-white/10 rounded-xl">${icon('clock','w-5 h-5 text-white')}</div></div>
         </div>
         <div class="stat-card bg-pink-500 cursor-pointer hover:scale-[1.02] transition-transform" onclick="openModal('statDetail', 'overdue')">
           <div class="flex items-center justify-between"><div><p class="text-sm opacity-90 text-white">Lewat Deadline</p><p class="text-3xl font-bold mt-1 text-white">${overdue}</p></div><div class="p-2.5 bg-white/20 rounded-xl">${icon('alert-triangle','w-5 h-5 text-white')}</div></div>
@@ -2163,7 +2921,6 @@ function renderHomeAdmin(){
       </div>
 
       <div class="grid grid-cols-1 lg:grid-cols-5 gap-6">
-        <!-- SCROLL LIMIT TASK LIST -->
         <div class="lg:col-span-3 bg-gray-50 rounded-2xl border border-gray-200 p-5 flex flex-col h-[400px]">
           <h3 class="font-semibold text-gray-800 mb-4 shrink-0">Daftar Tugas per Divisi &amp; PIC</h3>
           <div class="overflow-y-auto pr-2 space-y-2 flex-1">
@@ -2186,11 +2943,9 @@ function renderHomeAdmin(){
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div id="admin-calendar-container" class="bg-gray-50 rounded-2xl border border-gray-200 p-5 h-[420px] overflow-hidden">${adminCalendarHtml()}</div>
         <div id="admin-details-container" class="bg-gray-50 rounded-2xl border border-gray-200 p-5 h-[420px] overflow-y-auto">${adminDailyDetailsHtml()}</div>
-        <!-- Card Baru Khusus Hold -->
-<div id="admin-hold-container" class="bg-gray-50 rounded-2xl border border-gray-200 p-5 h-[420px] overflow-y-auto shadow-sm">${adminHoldDetailsHtml()}</div>
+        <div id="admin-hold-container" class="bg-gray-50 rounded-2xl border border-gray-200 p-5 h-[420px] overflow-y-auto shadow-sm">${adminHoldDetailsHtml()}</div>
       </div>
 
-     <!-- RANKING INTERAKTIF (PERBANDINGAN ANGKA + 3 WARNA KOMPOSISI) -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div class="bg-gray-50 rounded-2xl border border-gray-200 p-5">
           <div class="flex items-center gap-2 mb-5">${icon('trending-up','w-4.5 h-4.5 text-evergreen-dark')}<h3 class="font-semibold text-gray-800">Ranking Penyelesaian</h3></div>
@@ -2198,7 +2953,8 @@ function renderHomeAdmin(){
           <div class="mb-6 space-y-4">
             ${dirCompletion.map(d => `
               <div class="cursor-pointer hover:bg-gray-100 p-1.5 -mx-1.5 rounded-lg transition-colors" onclick='openModal("rankingCompletion", ${JSON.stringify(d).replace(/'/g, "&apos;")})'>
-                <div class="flex justify-between text-sm mb-1.5"><span class="font-bold text-gray-800">${d.divisi}</span><span class="text-evergreen-dark font-bold">${d.completionRate}% <span class="text-[10px] text-gray-400 font-normal">(${d.done}/${d.total})</span></span></div>
+                <!-- PENGGUNAAN SKOR RATA-RATA DECIMAL DI SINI -->
+                <div class="flex justify-between text-sm mb-1.5"><span class="font-bold text-gray-800">${d.divisi}</span><span class="text-evergreen-dark font-bold">${(d.total > 0 ? (d.done/d.total) : 0).toFixed(1)} <span class="text-[10px] text-gray-400 font-normal">(${d.done}/${d.total})</span></span></div>
                 <div class="w-full bg-gray-200 rounded-full h-2 overflow-hidden"><div class="h-full rounded-full bg-evergreen-dark transition-all duration-700" style="width:${d.completionRate}%"></div></div>
               </div>`).join('')}
           </div>
@@ -2206,7 +2962,8 @@ function renderHomeAdmin(){
           <div class="space-y-3 max-h-72 overflow-y-auto pr-2">
             ${divCompletion.map(d => `
               <div class="cursor-pointer hover:bg-gray-100 p-1.5 -mx-1.5 rounded-lg transition-colors" onclick='openModal("rankingCompletion", ${JSON.stringify(d).replace(/'/g, "&apos;")})'>
-                <div class="flex justify-between text-sm mb-1"><span class="font-medium text-gray-700">${d.divisi}</span><span class="text-gray-500 font-bold">${d.completionRate}% <span class="text-[10px] font-normal">(${d.done}/${d.total})</span></span></div>
+                <!-- PENGGUNAAN SKOR RATA-RATA DECIMAL DI SINI -->
+                <div class="flex justify-between text-sm mb-1"><span class="font-medium text-gray-700">${d.divisi}</span><span class="text-gray-500 font-bold">${(d.total > 0 ? (d.done/d.total) : 0).toFixed(1)} <span class="text-[10px] font-normal">(${d.done}/${d.total})</span></span></div>
                 <div class="w-full bg-gray-200 rounded-full h-1.5 overflow-hidden"><div class="h-full rounded-full bg-gray-400 transition-all duration-700" style="width:${d.completionRate}%"></div></div>
               </div>`).join('')}
           </div>
@@ -2219,7 +2976,8 @@ function renderHomeAdmin(){
             ${dirOnTime.map(d => {
               const otPct = d.total ? (d.onTime/d.total)*100 : 0; const opPct = d.total ? (d.onProgress/d.total)*100 : 0; const odPct = d.total ? (d.overdue/d.total)*100 : 0;
               return `<div class="cursor-pointer hover:bg-gray-100 p-1.5 -mx-1.5 rounded-lg transition-colors" onclick='openModal("rankingOnTime", ${JSON.stringify(d).replace(/'/g, "&apos;")})'>
-                <div class="flex justify-between text-sm mb-1.5"><span class="font-bold text-gray-800">${d.divisi}</span><span class="text-blue-600 font-bold">${d.onTimeRate}% <span class="text-[10px] text-gray-400 font-normal">Score</span></span></div>
+                <!-- KEMBALI KE FORMAT PERSENTASE + PERBANDINGAN ANGKA -->
+                <div class="flex justify-between text-sm mb-1.5"><span class="font-bold text-gray-800">${d.divisi}</span><span class="text-blue-600 font-bold">${d.onTimeRate}% <span class="text-[10px] text-gray-400 font-normal">(${d.onTime}/${d.total})</span></span></div>
                 <div class="w-full flex h-2 rounded-full overflow-hidden bg-gray-200">
                   <div class="bg-evergreen" style="width:${otPct}%" title="Selesai Tepat Waktu"></div><div class="bg-slate-600" style="width:${opPct}%" title="Belum Selesai (On Progress)"></div><div class="bg-pink-500" style="width:${odPct}%" title="Lewat Deadline"></div>
                 </div>
@@ -2230,7 +2988,8 @@ function renderHomeAdmin(){
             ${divOnTime.map(d => {
               const otPct = d.total ? (d.onTime/d.total)*100 : 0; const opPct = d.total ? (d.onProgress/d.total)*100 : 0; const odPct = d.total ? (d.overdue/d.total)*100 : 0;
               return `<div class="cursor-pointer hover:bg-gray-100 p-1.5 -mx-1.5 rounded-lg transition-colors" onclick='openModal("rankingOnTime", ${JSON.stringify(d).replace(/'/g, "&apos;")})'>
-                <div class="flex justify-between text-sm mb-1"><span class="font-medium text-gray-700">${d.divisi}</span><span class="text-gray-500 font-bold">${d.onTimeRate}% <span class="text-[10px] font-normal">Score</span></span></div>
+                <!-- KEMBALI KE FORMAT PERSENTASE + PERBANDINGAN ANGKA -->
+                <div class="flex justify-between text-sm mb-1"><span class="font-medium text-gray-700">${d.divisi}</span><span class="text-gray-500 font-bold">${d.onTimeRate}% <span class="text-[10px] font-normal">(${d.onTime}/${d.total})</span></span></div>
                 <div class="w-full flex h-1.5 rounded-full overflow-hidden bg-gray-200">
                   <div class="bg-evergreen" style="width:${otPct}%"></div><div class="bg-slate-600" style="width:${opPct}%"></div><div class="bg-pink-500" style="width:${odPct}%"></div>
                 </div>
@@ -2242,10 +3001,9 @@ function renderHomeAdmin(){
             <span class="flex items-center gap-1.5"><span class="w-2 h-2 bg-pink-500 rounded-full"></span> Overdue</span>
           </div>
         </div>
-      </div>
-      <!-- END RANKING -->
 
-      <div class="bg-gray-50 rounded-2xl border border-gray-200 p-5">
+      <!-- KOTAK TOP 5 DIBUAT MELEBAR PENUH KE KANAN (col-span-full) -->
+      <div class="bg-gray-50 rounded-2xl border border-gray-200 p-5 col-span-full">
         <div class="flex items-center gap-2 mb-4">${icon('award','w-4.5 h-4.5 text-amber-500')}<h3 class="font-semibold text-gray-800">Top 5 Divisi Tercepat &amp; Tepat Waktu</h3></div>
         <div class="grid grid-cols-2 sm:grid-cols-5 gap-3">
           ${top5.map((d,i) => `
@@ -2329,7 +3087,7 @@ function scheduleFilterBarHtml(showDivisiUser){
       <div><label class="block text-[10px] text-gray-500 font-bold uppercase mb-1">Status</label>
         <select class="field-input text-sm" onchange="updateScheduleFilter('status', this.value)">
           <option value="">Semua</option>
-          ${['Scheduled','Done','Canceled','Reschedule','Hold'].map(s=>`<option ${f.status===s?'selected':''}>${s}</option>`).join('')}
+          ${['Scheduled','Live','Done','Canceled','Reschedule','Hold'].map(s=>`<option ${f.status===s?'selected':''}>${s}</option>`).join('')}
         </select></div>
       ${showDivisiUser ? `
       <div><label class="block text-[10px] text-gray-500 font-bold uppercase mb-1">Divisi</label>
@@ -2378,20 +3136,49 @@ window.exportSchedulePDF = function() {
    ========================================================================= */
 function checkAutoDoneSchedules() {
   const now = new Date();
+  
   schedules.forEach(s => {
-    if (s.status === 'Canceled' || s.status === 'Done' || s.status === 'Hold') return;
+    // Abaikan jika agenda sudah dibatalkan, di-hold, atau sudah diselesaikan secara manual
+    if (s.status === 'Canceled' || s.status === 'Hold' || s.status === 'Done') return;
     
-    // Ambil waktu selesai dari string format "09:00 - 10:00"
+    // Pecah format waktu (contoh: "15:00 - 16:00" atau "15:00 - Selesai")
     const timeParts = s.waktu.split('-');
-    if(timeParts.length === 2) {
-      const endTime = timeParts[1].trim();
-      // Format menjadi objek Date: "YYYY-MM-DDTHH:mm:00"
-      const endDateTime = new Date(`${s.tanggal}T${endTime}:00`);
+    const startTimeStr = timeParts[0].trim();
+    let endTimeStr = timeParts[1] ? timeParts[1].trim() : '23:59';
+    
+    // Jika waktu selesai tertulis "Selesai", asumsikan selesai di penghujung hari
+    if (endTimeStr.toLowerCase() === 'selesai' || !endTimeStr.includes(':')) {
+      endTimeStr = '23:59';
+    }
+
+    // Pastikan format jam valid sebelum diproses agar tidak error
+    if (!startTimeStr.includes(':')) return;
+
+    // Gabungkan tanggal dan jam menjadi objek Date agar bisa dibandingkan
+    const startDateTime = new Date(`${s.tanggal}T${startTimeStr}:00`);
+    const endDateTime = new Date(`${s.tanggal}T${endTimeStr}:00`);
+
+    let targetStatus = s.status;
+
+    // LOGIKA PERUBAHAN STATUS BERDASARKAN WAKTU
+    if (now < startDateTime) {
+      targetStatus = 'Scheduled';
+    } else if (now >= startDateTime && now <= endDateTime) {
+      targetStatus = 'Live';
+    } else if (now > endDateTime) {
+      targetStatus = 'Done';
+    }
+
+    // Update ke database HANYA JIKA status berubah (Mencegah Infinite Loop)
+    if (s.status !== targetStatus) {
+      s.status = targetStatus;
       
-      // Jika waktu sekarang sudah melewati waktu selesai meeting, set Done
-      if (now > endDateTime) {
-        s.status = 'Done';
+      if (targetStatus === 'Done') {
+        s.doneDate = toISO(today); // Catat tanggal selesainya
       }
+      
+      // Simpan perubahan ke Firebase secara otomatis
+      window.set(window.ref(window.rtdb, "gaspol_schedules/" + s.id), s);
     }
   });
 }
@@ -2447,7 +3234,7 @@ function renderScheduleCards(filtered, isAdmin) {
 
     scheds.forEach(s => {
       const dInfo = getCardDateInfo(s.tanggal);
-      const isOnline = s.isHybrid || s.nama.toLowerCase().includes('hybrid') || s.nama.toLowerCase().includes('online') || s.nama.toLowerCase().includes('zoom');
+      const isOnline = s.nama.toLowerCase().includes('hybrid') || s.nama.toLowerCase().includes('online') || s.nama.toLowerCase().includes('zoom');
       const levelBadge = `<span class="px-2.5 py-1 rounded-md border text-[10px] font-bold uppercase tracking-wider ${LEVEL_STYLE[s.level] || 'bg-gray-50 text-gray-600 border-gray-200'}">${s.level}</span>`;
 
       // --- LOGIKA TOMBOL NOTULENSI & DOKUMENTASI ---
@@ -2513,21 +3300,23 @@ function renderScheduleCards(filtered, isAdmin) {
               <span>${icon('map-pin', 'w-3.5 h-3.5 text-gray-400')}</span>
               <span class="truncate">${s.lokasi || '-'}</span>
             </div>
-            ${s.isHybrid && s.zoomLink ? `
+           ${s.refLink ? `
             <div class="flex items-center gap-2 mt-2 pt-2 border-t border-dashed border-gray-200">
               <span>${icon('link', 'w-3.5 h-3.5 text-blue-500')}</span>
-              <a href="${s.zoomLink}" target="_blank" class="truncate text-blue-600 hover:text-blue-800 hover:underline font-medium text-xs">${s.zoomLink}</a>
+              <a href="${s.refLink}" target="_blank" class="truncate text-blue-600 hover:text-blue-800 hover:underline font-medium text-xs">Materi: ${s.refLink}</a>
             </div>` : ''}
           </div>
 
-          <!-- BOTTOM ROW: USERS, DIVISI & STATUS -->
+          <!-- BOTTOM ROW: USERS, DIVISI & STATUS (Dibuat agar teks tidak terpotong) -->
           <div class="flex flex-wrap items-center justify-between gap-4 pt-3 border-t border-gray-100 text-xs text-gray-500">
-            <div class="flex flex-wrap items-center gap-4 sm:gap-6">
-              <span class="flex items-center gap-1.5 max-w-[150px] truncate" title="${s.users.join(', ')}">
-                ${icon('user', 'w-3.5 h-3.5')} ${s.users.length > 0 ? s.users[0] + (s.users.length > 1 ? ` (+${s.users.length-1})` : '') : '-'}
+            <div class="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-6 flex-wrap">
+              <span class="flex items-center gap-1.5 text-gray-700 font-medium">
+                ${icon('user', 'w-3.5 h-3.5 shrink-0')} 
+                <span>${s.users.length > 0 ? s.users.join(', ') : '-'}</span>
               </span>
-              <span class="flex items-center gap-1.5 max-w-[150px] truncate" title="${s.divisi.join(', ')}">
-                ${icon('tag', 'w-3.5 h-3.5')} ${s.divisi.length > 0 ? s.divisi[0] + (s.divisi.length > 1 ? ` (+${s.divisi.length-1})` : '') : '-'}
+              <span class="flex items-center gap-1.5 text-gray-700 font-medium">
+                ${icon('tag', 'w-3.5 h-3.5 shrink-0')} 
+                <span>${s.divisi.length === DIVISIONS.length ? 'All Leader' : (s.divisi.length > 0 ? s.divisi.join(', ') : '-')}</span>
               </span>
             </div>
             
@@ -2978,41 +3767,25 @@ window.handleUploadDokumentasi = async function(input, scheduleId) {
   if(input.files && input.files[0]) {
     const s = schedules.find(x => x.id === scheduleId);
     if(!s.dokumentasi) s.dokumentasi = [];
-    if(s.dokumentasi.length >= 2) return alert('Maksimal hanya 2 foto dokumentasi!');
-    
-    const file = input.files[0];
-    
-    // Tampilkan indikator loading (opsional tapi disarankan)
-    alert("Sedang mengupload gambar ke server, mohon tunggu sebentar...");
+    if(s.dokumentasi.length >= 2) return alert('Maksimal hanya 2 foto!');
 
+    alert("Mengupload gambar ke server...");
     const formData = new FormData();
-    formData.append("file", file);
+    formData.append("file", input.files[0]);
     formData.append("upload_preset", window.CLOUDINARY_PRESET);
 
     try {
-      // Hit API Cloudinary
-      const response = await fetch(window.CLOUDINARY_URL, {
-        method: "POST",
-        body: formData
-      });
-      
-      const data = await response.json();
-      
+      const res = await fetch(window.CLOUDINARY_URL, { method: "POST", body: formData });
+      const data = await res.json();
       if(data.secure_url) {
-        // Simpan URL Cloudinary ke dalam array dokumentasi
         s.dokumentasi.push(data.secure_url);
-        
-        // Simpan perubahan ke Firebase
-        await window.saveData();
-        
+        await window.set(window.ref(window.rtdb, "gaspol_schedules/" + s.id), s);
         alert("Gambar berhasil diupload!");
-        openModal("dokumentasi", s); // Render ulang modal
-      } else {
-        alert("Gagal mengupload gambar. Periksa Cloudinary config Anda.");
+        openModal("dokumentasi", s);
       }
-    } catch (error) {
-      console.error("Upload error:", error);
-      alert("Terjadi kesalahan saat mengupload gambar.");
+    } catch (err) {
+      console.error(err);
+      alert("Gagal mengupload gambar.");
     }
   }
 };
@@ -3021,10 +3794,11 @@ window.hapusDokumentasi = async function(scheduleId, index) {
   const s = schedules.find(x => x.id === scheduleId);
   if(s && s.dokumentasi) {
     s.dokumentasi.splice(index, 1);
-    await window.saveData(); // Tambahkan await
+    await window.set(window.ref(window.rtdb, "gaspol_schedules/" + s.id), s);
     openModal("dokumentasi", s); 
   }
 };
+
 
 function renderExportAdmin() {
   const currentMonth = toISO(today).slice(0, 7); // Format YYYY-MM
@@ -3065,68 +3839,66 @@ window.downloadCSV = async function(type) {
   const monthVal = document.getElementById('export-month').value;
   if (!monthVal) return alert("Pilih bulan terlebih dahulu!");
 
-  alert(`Memproses data ${type} untuk bulan ${monthVal}. File akan otomatis terunduh saat selesai.`);
+  alert(`Memproses data ${type} untuk bulan ${monthVal}...`);
 
   try {
     let csvContent = "";
     const currentDomain = window.location.origin + window.location.pathname;
 
     if (type === 'agenda') {
-      const q = window.query(window.collection(window.db, "gaspol_schedules"));
-      const snap = await window.getDocs(q);
-      
+      const snap = await window.get(window.child(window.ref(window.rtdb), "gaspol_schedules"));
       csvContent += "Tgl Input,Nama Agenda,Tanggal Agenda,Divisi Hadir,Peserta Hadir,Notulensi Agenda,Foto Dokumentasi 1,Foto Dokumentasi 2\n";
       
-      snap.forEach(doc => {
-        const s = doc.data();
-        if (s.tanggal.startsWith(monthVal)) {
-          const inputDate = new Date(parseInt(s.id.substring(1))).toLocaleDateString('id-ID');
-          const divStr = s.divisi ? s.divisi.join(' | ') : '';
-          const usrStr = s.users ? s.users.join(' | ') : '';
-          const notulensiLink = s.notulensi ? `${currentDomain}?viewNotulensi=${s.id}` : 'Belum Ada';
-          const foto1 = (s.dokumentasi && s.dokumentasi[0]) ? s.dokumentasi[0] : '-';
-          const foto2 = (s.dokumentasi && s.dokumentasi[1]) ? s.dokumentasi[1] : '-';
+      if (snap.exists()) {
+        const data = snap.val();
+        for (let key in data) {
+          const s = data[key];
+          if (s.tanggal && s.tanggal.startsWith(monthVal)) {
+            const inputDate = s.inputDate ? fmtDate(s.inputDate) : '-';
+            const divStr = s.divisi ? s.divisi.join(' | ') : '';
+            const usrStr = s.users ? s.users.join(' | ') : '';
+            const notulensiLink = s.notulensi ? `${currentDomain}?viewNotulensi=${s.id}` : 'Belum Ada';
+            const foto1 = (s.dokumentasi && s.dokumentasi[0]) ? s.dokumentasi[0] : '-';
+            const foto2 = (s.dokumentasi && s.dokumentasi[1]) ? s.dokumentasi[1] : '-';
 
-          const row = `"${inputDate}","${escCSV(s.nama)}","${s.tanggal}","${divStr}","${usrStr}","${notulensiLink}","${foto1}","${foto2}"`;
-          csvContent += row + "\n";
+            csvContent += `"${inputDate}","${escCSV(s.nama)}","${s.tanggal}","${divStr}","${usrStr}","${notulensiLink}","${foto1}","${foto2}"\n`;
+          }
         }
-      });
+      }
     } else if (type === 'task') {
-      const q = window.query(window.collection(window.db, "gaspol_tasks"));
-      const snap = await window.getDocs(q);
-      
+      const snap = await window.get(window.child(window.ref(window.rtdb), "gaspol_tasks"));
       csvContent += "Tgl Input,Nama Tugas,Detail Tugas,Link Referensi,Deadline,Divisi,PIC,Keterangan Progres,Hambatan,Output (Bukti Kerja),Status\n";
 
-      snap.forEach(doc => {
-        const t = doc.data();
-        const tDate = t.inputDate || t.deadline; 
-        if (tDate && tDate.startsWith(monthVal)) {
-          const inputDate = t.inputDate ? fmtDate(t.inputDate) : new Date(parseInt(t.id.substring(1))).toLocaleDateString('id-ID');
-          const divStr = t.divisi ? t.divisi.join(' | ') : '';
-          const picStr = t.pic ? t.pic.join(' | ') : '';
-          const status = t.done ? 'Done' : 'Belum Selesai';
+      if (snap.exists()) {
+        const data = snap.val();
+        for (let key in data) {
+          const t = data[key];
+          const tDate = t.inputDate || t.deadline; 
+          if (tDate && tDate.startsWith(monthVal)) {
+            const inputDate = t.inputDate ? fmtDate(t.inputDate) : '-';
+            const divStr = t.divisi ? t.divisi.join(' | ') : '';
+            const picStr = t.pic ? t.pic.join(' | ') : '';
+            const status = t.done ? 'Done' : 'Belum Selesai';
 
-          const row = `"${inputDate}","${escCSV(t.name)}","${escCSV(t.desc)}","${t.taskLink || '-'}","${t.deadline}","${divStr}","${picStr}","${escCSV(t.progressDetail)}","${escCSV(t.obstacle)}","${t.proofLink || '-'}","${status}"`;
-          csvContent += row + "\n";
+            csvContent += `"${inputDate}","${escCSV(t.name)}","${escCSV(t.desc)}","${t.taskLink || '-'}","${t.deadline}","${divStr}","${picStr}","${escCSV(t.progressDetail)}","${escCSV(t.obstacle)}","${t.proofLink || '-'}","${status}"\n`;
+          }
         }
-      });
+      }
     }
 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
-    const url = URL.createObjectURL(blob);
-    link.setAttribute("href", url);
-    link.setAttribute("download", `GASPOL_${type}_${monthVal}.csv`);
+    link.href = URL.createObjectURL(blob);
+    link.download = `GASPOL_${type}_${monthVal}.csv`;
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-
   } catch (err) {
     console.error(err);
     alert("Gagal menarik data dari server.");
   }
-}
+};
 
 function escCSV(text) {
   if (!text) return '';
