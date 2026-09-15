@@ -2450,6 +2450,7 @@ function renderTopBar(){
   if (cu.role === 'admin') {
     tabs.push(['export', 'Data', 'database']); // Teks diubah menjadi "Data"
   }
+tabs.push(['arsip', 'Arsip', 'archive']);
 
   const activeIndex = tabs.findIndex(t => t[0] === state.activeTab);
   const isHome = state.activeTab === 'home';
@@ -3753,9 +3754,15 @@ function renderTabContent(){
   if(state.activeTab === 'schedule') html = isAdmin ? renderScheduleAdmin() : renderScheduleUser();
   if(state.activeTab === 'task') html = isAdmin ? renderTaskAdmin() : renderTaskUser();
   
-  // Rute baru
+  // Rute arsip & export
   if(state.activeTab === 'export' && isAdmin) html = renderExportAdmin();
   
+  // Tab Arsip kini terbuka untuk admin maupun user biasa
+  if(state.activeTab === 'arsip') {
+    html = renderArsipAdmin();
+    setTimeout(() => loadArchivedData(), 100); 
+  }
+
   el.innerHTML = html;
   refreshIcons();
 }
@@ -3925,6 +3932,242 @@ function mountApp(){
   renderTabContent();
   refreshIcons();
 }
+
+
+function renderArsipAdmin() {
+  const cu = state.currentUser;
+  const isAdmin = cu.role === 'admin';
+
+  return `
+  <div class="max-w-[90rem] mx-auto px-4 md:px-8 py-8 anim-slideup">
+    <div class="bg-white rounded-3xl border border-gray-200 shadow-sm p-6 md:p-8 space-y-6">
+      
+      <div>
+        <h1 class="text-3xl font-extrabold text-gray-900 flex items-center gap-2">${icon('archive', 'w-7 h-7 text-evergreen-dark')} Arsip Sistem</h1>
+        <p class="text-gray-500 text-sm mt-1">Gunakan filter di bawah ini untuk mencari data arsip secara spesifik guna menjaga efisiensi bandwidth server.</p>
+      </div>
+
+      <!-- PANEL FILTER PENCARIAN DENGAN TOMBOL RESET -->
+      <div class="bg-gray-50 p-5 rounded-2xl border border-gray-200 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 items-end">
+        <div>
+          <label class="block text-[10px] text-gray-500 font-bold uppercase mb-1">Dari Tanggal</label>
+          <input type="date" id="archive-start-date" class="field-input text-sm" />
+        </div>
+        <div>
+          <label class="block text-[10px] text-gray-500 font-bold uppercase mb-1">Sampai Tanggal</label>
+          <input type="date" id="archive-end-date" class="field-input text-sm" />
+        </div>
+        <div>
+          <label class="block text-[10px] text-gray-500 font-bold uppercase mb-1">Cari Nama / Kata Kunci</label>
+          <input type="text" id="archive-keyword" class="field-input text-sm" placeholder="Contoh: stiker..." />
+        </div>
+        
+        <div>
+          <label class="block text-[10px] text-gray-500 font-bold uppercase mb-1">Divisi</label>
+          <select id="archive-divisi" class="field-input text-sm">
+            <option value="">Semua Divisi</option>
+            ${DIVISIONS.map(d => `<option value="${d}">${d}</option>`).join('')}
+          </select>
+        </div>
+
+        <!-- TOMBOL AKSI (CARI & RESET) -->
+        <div class="flex items-center gap-2">
+          <button onclick="resetArchiveFilter()" class="btn-ghost px-3 py-2.5 text-xs font-bold" title="Reset Filter">
+            ${icon('rotate-ccw', 'w-4 h-4')}
+          </button>
+          <button onclick="fetchArchivedData()" class="btn-primary flex-1 justify-center py-2.5 shadow-md text-xs">
+            ${icon('search', 'w-3.5 h-3.5')} Tampilkan
+          </button>
+        </div>
+      </div>
+
+      <!-- HASIL PENCARIAN AGENDA -->
+      <div class="space-y-4 pt-2">
+        <h3 class="font-bold text-gray-800 text-lg border-b border-gray-100 pb-2 flex items-center justify-between">
+          <span>Arsip Agenda &amp; Notulensi Rapat</span>
+          <span id="count-scheds" class="text-xs font-normal text-gray-400">Gunakan filter untuk memuat data</span>
+        </h3>
+        <div id="archived-schedules-list" class="grid grid-cols-1 gap-3">
+          <div class="text-center py-10 text-gray-400 bg-gray-50/50 rounded-2xl border border-dashed border-gray-200">
+            ${icon('filter', 'w-8 h-8 mx-auto mb-2 opacity-40')}
+            <p class="text-sm">Silakan tentukan filter lalu klik "Tampilkan".</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- HASIL PENCARIAN TUGAS -->
+      <div class="space-y-4 pt-6 border-t border-gray-100">
+        <h3 class="font-bold text-gray-800 text-lg border-b border-gray-100 pb-2 flex items-center justify-between">
+          <span>Arsip Tugas &amp; Hasil Pengerjaan</span>
+          <span id="count-tasks" class="text-xs font-normal text-gray-400">Gunakan filter untuk memuat data</span>
+        </h3>
+        <div id="archived-tasks-list" class="grid grid-cols-1 gap-3">
+          <div class="text-center py-10 text-gray-400 bg-gray-50/50 rounded-2xl border border-dashed border-gray-200">
+            ${icon('filter', 'w-8 h-8 mx-auto mb-2 opacity-40')}
+            <p class="text-sm">Silakan tentukan filter lalu klik "Tampilkan".</p>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>`;
+}
+
+window.resetArchiveFilter = function() {
+  const startDateEl = document.getElementById('archive-start-date');
+  const endDateEl = document.getElementById('archive-end-date');
+  const keywordEl = document.getElementById('archive-keyword');
+  const divisiEl = document.getElementById('archive-divisi');
+
+  if (startDateEl) startDateEl.value = '';
+  if (endDateEl) endDateEl.value = '';
+  if (keywordEl) keywordEl.value = '';
+  if (divisiEl) divisiEl.value = '';
+
+  const schedContainer = document.getElementById('archived-schedules-list');
+  const taskContainer = document.getElementById('archived-tasks-list');
+  const countScheds = document.getElementById('count-scheds');
+  const countTasks = document.getElementById('count-tasks');
+
+  if (countScheds) countScheds.textContent = 'Gunakan filter untuk memuat data';
+  if (countTasks) countTasks.textContent = 'Gunakan filter untuk memuat data';
+
+  if (schedContainer) {
+    schedContainer.innerHTML = `
+      <div class="text-center py-10 text-gray-400 bg-gray-50/50 rounded-2xl border border-dashed border-gray-200">
+        ${icon('filter', 'w-8 h-8 mx-auto mb-2 opacity-40')}
+        <p class="text-sm">Silakan tentukan filter lalu klik "Tampilkan".</p>
+      </div>`;
+  }
+
+  if (taskContainer) {
+    taskContainer.innerHTML = `
+      <div class="text-center py-10 text-gray-400 bg-gray-50/50 rounded-2xl border border-dashed border-gray-200">
+        ${icon('filter', 'w-8 h-8 mx-auto mb-2 opacity-40')}
+        <p class="text-sm">Silakan tentukan filter lalu klik "Tampilkan".</p>
+      </div>`;
+  }
+};
+
+// FUNGSI FETCH ARSIP DENGAN FILTER DIVISI & FLEKSIBEL
+window.fetchArchivedData = async function() {
+  const startDate = document.getElementById('archive-start-date').value;
+  const endDate = document.getElementById('archive-end-date').value;
+  const keyword = document.getElementById('archive-keyword').value.trim().toLowerCase();
+  const selectedDivisi = document.getElementById('archive-divisi') ? document.getElementById('archive-divisi').value : '';
+
+  const schedContainer = document.getElementById('archived-schedules-list');
+  const taskContainer = document.getElementById('archived-tasks-list');
+  const countScheds = document.getElementById('count-scheds');
+  const countTasks = document.getElementById('count-tasks');
+
+  schedContainer.innerHTML = `<div class="text-center py-8 text-gray-400">Mencari data arsip...</div>`;
+  taskContainer.innerHTML = `<div class="text-center py-8 text-gray-400">Mencari data arsip...</div>`;
+
+  const cu = state.currentUser;
+  const isAdmin = cu.role === 'admin';
+
+  try {
+    // 1. Tarik & Filter Arsip Agenda
+    const schedSnap = await window.get(window.child(window.ref(window.rtdb), "gaspol_schedules"));
+    let archivedScheds = [];
+    if (schedSnap.exists()) {
+      const data = schedSnap.val();
+      Object.keys(data).forEach(k => {
+        const s = data[k];
+        
+        // Cek apakah masuk kategori arsip ATAU statusnya sudah Done/Canceled (agar data yang baru selesai tetap bisa ditemukan saat difilter)
+        const isActuallyArchived = s.isArchived || s.status === 'Done' || s.status === 'Canceled';
+        if (!isActuallyArchived) return;
+
+        // Filter hak akses divisi jika bukan admin
+        if (!isAdmin && !s.divisi.includes(cu.divisi)) return;
+        // Filter pilihan dropdown divisi (jika admin memilih divisi tertentu)
+        if (isAdmin && selectedDivisi && !s.divisi.includes(selectedDivisi)) return;
+
+        // Filter Tanggal
+        if (startDate && s.tanggal < startDate) return;
+        if (endDate && s.tanggal > endDate) return;
+
+        // Filter Kata Kunci Nama
+        if (keyword && !s.nama.toLowerCase().includes(keyword)) return;
+
+        archivedScheds.push(s);
+      });
+    }
+
+    countScheds.textContent = `${archivedScheds.length} ditemukan`;
+    if (archivedScheds.length === 0) {
+      schedContainer.innerHTML = `<p class="text-sm text-gray-400 py-6 text-center bg-gray-50 rounded-2xl">Tidak ada arsip agenda yang sesuai.</p>`;
+    } else {
+      schedContainer.innerHTML = archivedScheds.map(s => `
+        <div class="flex items-center justify-between p-4 bg-gray-50 border border-gray-200 rounded-2xl hover:border-evergreen transition-all">
+          <div>
+            <p class="text-sm font-bold text-gray-900">${s.nama}</p>
+            <p class="text-xs text-gray-500 mt-1">${fmtDate(s.tanggal)} • ${s.waktu} • Divisi: ${s.divisi.join(', ')}</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <button onclick='openModal("notulensi", {schedule: ${JSON.stringify(s).replace(/'/g, "&apos;")}, mode:"view"})' class="px-3 py-1.5 rounded-xl bg-blue-50 text-blue-600 font-bold text-xs hover:bg-blue-100 transition-all flex items-center gap-1.5 shadow-sm">
+              ${icon('file-text', 'w-3.5 h-3.5')} Lihat Notulensi
+            </button>
+            <button onclick='openModal("dokumentasi", ${JSON.stringify(s).replace(/'/g, "&apos;")})' class="px-3 py-1.5 rounded-xl bg-purple-50 text-purple-600 font-bold text-xs hover:bg-purple-100 transition-all flex items-center gap-1.5 shadow-sm">
+              ${icon('camera', 'w-3.5 h-3.5')} Foto (${s.dokumentasi ? s.dokumentasi.length : 0})
+            </button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    // 2. Tarik & Filter Arsip Tugas
+    const taskSnap = await window.get(window.child(window.ref(window.rtdb), "gaspol_tasks"));
+    let archivedTasks = [];
+    if (taskSnap.exists()) {
+      const data = taskSnap.val();
+      Object.keys(data).forEach(k => {
+        const t = data[k];
+        
+        // Cek apakah masuk arsip atau sudah selesai (memastikan tugas stiker yang baru selesai bisa langsung tampil)
+        const isActuallyArchived = t.isArchived || t.done;
+        if (!isActuallyArchived) return;
+
+        // Filter hak akses divisi jika bukan admin
+        if (!isAdmin && !t.divisi.includes(cu.divisi)) return;
+        // Filter dropdown divisi admin
+        if (isAdmin && selectedDivisi && !t.divisi.includes(selectedDivisi)) return;
+
+        // Filter Tanggal Deadline
+        if (startDate && t.deadline < startDate) return;
+        if (endDate && t.deadline > endDate) return;
+
+        // Filter Kata Kunci Nama / Deskripsi
+        if (keyword && !t.name.toLowerCase().includes(keyword) && !t.desc.toLowerCase().includes(keyword)) return;
+
+        archivedTasks.push(t);
+      });
+    }
+
+    countTasks.textContent = `${archivedTasks.length} ditemukan`;
+    if (archivedTasks.length === 0) {
+      taskContainer.innerHTML = `<p class="text-sm text-gray-400 py-6 text-center bg-gray-50 rounded-2xl">Tidak ada arsip tugas yang sesuai.</p>`;
+    } else {
+      taskContainer.innerHTML = archivedTasks.map(t => `
+        <div class="flex items-center justify-between p-4 bg-gray-50 border border-gray-200 rounded-2xl hover:border-evergreen transition-all">
+          <div>
+            <p class="text-sm font-bold text-gray-900">${t.name}</p>
+            <p class="text-xs text-gray-500 mt-1">Deadline: ${fmtDate(t.deadline)} • Divisi: ${t.divisi.join(', ')} • PIC: ${t.pic ? t.pic.join(', ') : '-'}</p>
+          </div>
+          <button onclick='openModal("taskDetail", ${JSON.stringify(t).replace(/'/g, "&apos;")})' class="px-3 py-1.5 rounded-xl bg-gray-200 text-gray-700 font-bold text-xs hover:bg-gray-300 transition-all flex items-center gap-1.5 shadow-sm">
+            ${icon('eye', 'w-3.5 h-3.5')} Lihat Hasil &amp; Progres
+          </button>
+        </div>
+      `).join('');
+    }
+
+  } catch (err) {
+    console.error("Gagal memuat arsip:", err);
+    alert("Gagal mengambil data arsip dari server.");
+  }
+};
 
 mountApp();
 </script>
