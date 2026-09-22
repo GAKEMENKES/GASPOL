@@ -122,6 +122,7 @@ import {
   updateEmail,
   updatePassword,
   reauthenticateWithCredential,
+onAuthStateChanged,
   EmailAuthProvider
 } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";  
 
@@ -150,6 +151,7 @@ window.orderByChild = orderByChild;
 window.equalTo = equalTo;
 window.signInWithEmailAndPassword = signInWithEmailAndPassword;
 window.signOut = signOut;
+window.onAuthStateChanged = onAuthStateChanged;
 window.createUserWithEmailAndPassword = createUserWithEmailAndPassword;
 
 // 👇 TAMBAHKAN BARIS INI AGAR ERROR HILANG 👇
@@ -180,7 +182,18 @@ window.signOut =
 window.createUserWithEmailAndPassword =
   createUserWithEmailAndPassword;
 
-
+window.submitAbsensi = async function(e, id) {
+  e.preventDefault();
+  const s = schedules.find(x => x.id === id);
+  if (s) {
+    const checkboxes = document.querySelectorAll('.absensi-cb:checked');
+    s.hadir = Array.from(checkboxes).map(cb => cb.value);
+    await window.set(window.ref(window.rtdb, "gaspol_schedules/" + id), s);
+    alert('Data absensi peserta berhasil disimpan!');
+    closeModal();
+  }
+  return false;
+};
 
   // Menggunakan query untuk memfilter data langsung dari server Firebase
 const tasksQuery = query(ref(rtdb, "gaspol_tasks"), orderByChild("isArchived"), equalTo(false));
@@ -208,8 +221,10 @@ onValue(tasksQuery, (snapshot) => {
       window.tasks.push(t);
     });
   }
-  if(window.state && window.state.currentUser) { if(typeof renderTabContent === 'function') renderTabContent(); }
-});
+  if (window.state && window.state.currentUser && typeof renderTabContent === 'function') {
+      renderTabContent();
+    }
+  });
 
   // Real-Time Listener Schedules (RTDB) - VERSI OPTIMASI BANDWIDTH
   const schedulesQuery = query(ref(rtdb, "gaspol_schedules"), orderByChild("isArchived"), equalTo(false));
@@ -262,6 +277,35 @@ onValue(tasksQuery, (snapshot) => {
     }
   });
   
+// Tempatkan di bagian bawah <script type="module">
+
+  // --- PEMANTAU SESI FIREBASE (VERSI OPTIMASI) ---
+  onAuthStateChanged(auth, async (user) => {
+    if (user) {
+      try {
+        const dbRef = ref(rtdb);
+        const snapshot = await get(child(dbRef, "gaspol_users/" + user.uid));
+        
+        if (snapshot.exists()) {
+          window.state.currentUser = snapshot.val();
+        } else {
+          window.state.currentUser = null;
+        }
+      } catch (error) {
+        console.error("Gagal memuat sesi:", error);
+        window.state.currentUser = null;
+      }
+    } else {
+      window.state.currentUser = null;
+    }
+
+    // Panggil mountApp() setelah status login pasti terverifikasi
+    if (typeof mountApp === 'function') {
+      mountApp();
+    }
+  });
+</script>
+
 </script>
 
 <script>
@@ -445,6 +489,7 @@ window.submitEditTask = async function(e, id) {
 
 let state = {
   currentUser: null,
+activeTab: localStorage.getItem('gaspol_activeTab') || 'home',
   isRegistering: false,
   loginType: null,
   activeTab: 'home',
@@ -701,6 +746,40 @@ if (type === 'editProfile') {
     `;
   }
 
+
+if(type === 'absensi') {
+    const s = payload;
+    title = 'Absensi Meeting: ' + s.nama;
+    if(!s.hadir) s.hadir = [];
+
+    body = `
+      <form onsubmit="return submitAbsensi(event, '${s.id}')">
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
+          <p class="text-sm text-gray-500 bg-emerald-50 p-3 rounded-xl border border-emerald-100 flex-1 m-0">Centang nama peserta yang <b>hadir</b>.</p>
+          <label class="flex items-center gap-2 cursor-pointer bg-gray-100 px-4 py-2.5 rounded-xl hover:bg-gray-200 transition-all border border-gray-200 whitespace-nowrap">
+            <input type="checkbox" onchange="toggleAllAbsensi(this)" class="w-4 h-4 text-emerald-600 rounded border-gray-300">
+            <span class="text-xs font-bold text-gray-700">Pilih Semua</span>
+          </label>
+        </div>
+        <div class="max-h-60 overflow-y-auto space-y-2 mb-4 pr-1">
+          ${s.users.length === 0 ? '<p class="text-sm text-gray-400 italic text-center py-4">Tidak ada peserta terdaftar di agenda ini.</p>' : [...s.users].sort((a, b) => a.localeCompare(b)).map(u => {
+            const isChecked = s.hadir.includes(u);
+            return `
+              <label class="flex items-center gap-3 p-3 border border-gray-200 rounded-xl cursor-pointer hover:bg-gray-50 transition-all ${isChecked ? 'bg-emerald-50/30 border-emerald-300' : ''}">
+                <input type="checkbox" value="${u}" class="w-4 h-4 absensi-cb text-emerald-600 rounded border-gray-300" ${isChecked ? 'checked' : ''} />
+                <span class="text-sm font-bold text-gray-800">${u}</span>
+              </label>
+            `;
+          }).join('')}
+        </div>
+        <div class="flex justify-end gap-3 pt-4 border-t border-gray-100">
+          <button type="button" class="btn-ghost" onclick="closeModal()">Batal</button>
+          <button type="submit" class="px-5 py-2.5 rounded-xl bg-evergreen text-gray-900 font-bold hover:bg-evergreen-hover transition-all shadow-md">Simpan Absensi</button>
+        </div>
+      </form>
+    `;
+  }
+
   if(type === 'statDetail') {
     const mode = payload; wide = true;
     let filteredTasks = [];
@@ -708,6 +787,7 @@ if (type === 'editProfile') {
     if(mode === 'done') { title = "Daftar Tugas Selesai"; filteredTasks = tasks.filter(t=>t.done); }
     if(mode === 'progress') { title = "Daftar Tugas Belum Selesai (On Progress)"; filteredTasks = tasks.filter(t=>!t.done && daysDiff(t.deadline) >= 0); }
     if(mode === 'overdue') { title = "Daftar Tugas Lewat Deadline"; filteredTasks = tasks.filter(t=> !t.done && daysDiff(t.deadline) < 0); }
+if(mode === 'pendingExt') { title = "Menunggu Persetujuan Ekstensi"; filteredTasks = tasks.filter(t=> t.extensions && t.extensions.some(ex => ex.status === 'pending')); }
     
     body = `
       <div class="max-h-[60vh] overflow-y-auto pr-2 space-y-2">
@@ -856,6 +936,7 @@ if (type === 'editProfile') {
   if(type === 'taskDetail'){
     const t = payload; const status = getTaskStatus(t);
     title = t.name;
+    wide = true; // <-- TAMBAHKAN BARIS INI UNTUK MEMPERLEBAR TAMPILAN
     const isUserAndNotDone = (state.currentUser.role === 'user' && !t.done);
 
     // --- LOGIKA PENCARIAN PINTAR REFERENSI NOTULENSI ---
@@ -958,6 +1039,100 @@ if (type === 'editProfile') {
           </div>
         ` : ''}
 
+<!-- KODE BARU TIMELINE & EXTENSION DIMULAI DI SINI -->
+        ${t.timeline && t.timeline.length > 0 ? `
+          <div class="mt-6 bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+            <h4 class="font-bold text-gray-800 text-xs uppercase tracking-wider mb-4 flex items-center gap-2">${icon('history','w-4 h-4 text-gray-500')} Riwayat & Timeline Tugas</h4>
+            <div class="space-y-4 pl-3 border-l-2 border-gray-100 ml-2">
+              ${t.timeline.map(tl => {
+                let dotColor = 'bg-slate-400'; 
+                let titleColor = 'text-gray-800';
+                let boxBg = 'bg-gray-50';
+                let boxBorder = 'border-gray-100';
+
+                // Cek kata kunci pada judul riwayat untuk menentukan warna
+                const titleLower = tl.title.toLowerCase();
+                
+                if (titleLower.includes('pengajuan')) {
+                  dotColor = 'bg-orange-500';
+                  titleColor = 'text-orange-600';
+                  boxBg = 'bg-orange-50';
+                  boxBorder = 'border-orange-100';
+                } else if (titleLower.includes('ditolak')) {
+                  dotColor = 'bg-rose-500';
+                  titleColor = 'text-rose-600';
+                  boxBg = 'bg-rose-50';
+                  boxBorder = 'border-rose-100';
+                } else if (titleLower.includes('disetujui')) {
+                  dotColor = 'bg-evergreen-dark';
+                  titleColor = 'text-evergreen-dark';
+                  boxBg = 'bg-evergreen-light/30';
+                  boxBorder = 'border-evergreen-light';
+                } else {
+                  // Default untuk "Update Progres" atau "Tugas Dibuat"
+                  dotColor = 'bg-evergreen-dark'; 
+                  titleColor = 'text-gray-800';
+                  boxBg = 'bg-gray-50';
+                  boxBorder = 'border-gray-100';
+                }
+
+                return `
+                <div class="relative pl-4">
+                  <div class="absolute w-3 h-3 ${dotColor} rounded-full -left-[23px] top-1 border-[3px] border-white shadow-sm transition-colors"></div>
+                  <p class="text-xs font-bold ${titleColor}">${tl.title}</p>
+                  <p class="text-[10px] text-gray-400 font-medium mb-1">${fmtDate(tl.date)} • ${tl.time} WIB</p>
+                  ${tl.desc ? `<p class="text-xs text-gray-700 ${boxBg} p-2 rounded-lg border ${boxBorder} transition-colors">${tl.desc}</p>` : ''}
+                </div>
+                `;
+              }).join('')}
+            </div>
+          </div>
+        ` : ''}
+
+        ${(() => {
+          if (!t.extensions) t.extensions = [];
+          const pendingExt = t.extensions.find(ex => ex.status === 'pending');
+          const extCount = t.extensions.length;
+
+          if (isUserAndNotDone) {
+            if (pendingExt) {
+              return `<div class="bg-amber-50 p-3 rounded-xl border border-amber-200 mt-4 text-xs text-amber-700 font-medium flex gap-2">${icon('clock','w-4 h-4 shrink-0')} Menunggu persetujuan Admin untuk perpanjangan deadline ke tanggal <b>${fmtDate(pendingExt.reqDate)}</b>.</div>`;
+            } else if (extCount < 3) {
+              return `
+                <div class="bg-white border border-gray-200 rounded-xl p-4 mt-4 shadow-sm">
+                  <h4 class="font-bold text-gray-800 text-xs mb-3 flex justify-between items-center">Ajukan Perpanjangan Waktu <span class="bg-gray-100 px-2 py-0.5 rounded text-[10px] text-gray-500">Kesempatan: ${3 - extCount} Tersisa</span></h4>
+                  <div class="space-y-3">
+                    <label class="block"><span class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Usulan Tanggal Baru</span>
+                    <input type="date" id="ext-date" class="field-input text-sm" /></label>
+                    <label class="block"><span class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Alasan Keterlambatan</span>
+                    <textarea id="ext-reason" class="field-input text-sm min-h-[50px] resize-none" placeholder="Jelaskan secara detail..."></textarea></label>
+                    <button type="button" onclick="requestExtension('${t.id}')" class="w-full px-4 py-2.5 bg-gray-800 text-white rounded-xl text-xs font-bold hover:bg-black transition-all shadow-md">Kirim Pengajuan Perpanjangan</button>
+                  </div>
+                </div>`;
+            } else {
+              return `<div class="bg-rose-50 p-3 rounded-xl border border-rose-200 mt-4 text-xs text-rose-700 font-medium">Batas maksimal pengajuan perpanjangan deadline (3x) telah habis.</div>`;
+            }
+          }
+          else if (state.currentUser.role === 'admin' && !t.done && pendingExt) {
+            return `
+              <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 mt-4 shadow-sm">
+                <h4 class="font-bold text-amber-800 text-xs mb-3 flex items-center gap-1">${icon('alert-triangle','w-4 h-4')} Tindakan Dibutuhkan: Pengajuan Perpanjangan Ke-${extCount}</h4>
+                <div class="bg-white p-3 rounded-lg border border-amber-100 mb-3">
+                  <p class="text-[10px] text-gray-400 font-bold uppercase mb-0.5">Alasan User:</p>
+                  <p class="text-xs text-gray-700 font-medium">${pendingExt.reason}</p>
+                </div>
+                <label class="block text-xs font-bold text-amber-800 mb-1.5">Tentukan Tanggal Persetujuan:</label>
+                <input type="date" id="ext-approve-date" class="field-input text-sm mb-3 border-amber-300 focus:border-amber-500 bg-white" value="${pendingExt.reqDate}" />
+                <div class="flex gap-2.5">
+                  <button type="button" onclick="rejectExtension('${t.id}')" class="flex-1 px-4 py-2.5 bg-rose-500 text-white rounded-xl text-xs font-bold hover:bg-rose-600 transition-all shadow-md flex items-center justify-center gap-1.5">${icon('x', 'w-4 h-4')} Tolak</button>
+                  <button type="button" onclick="approveExtension('${t.id}')" class="flex-[2] px-4 py-2.5 bg-amber-500 text-white rounded-xl text-xs font-bold hover:bg-amber-600 transition-all shadow-md flex items-center justify-center gap-1.5">Konfirmasi Ubah Deadline</button>
+                </div>
+              </div>`;
+          }
+          return '';
+        })()}
+        <!-- KODE BARU TIMELINE & EXTENSION BERAKHIR DI SINI -->
+
         ${(state.currentUser.role==='admin' && !t.done) ? `
           <div class="flex items-center justify-end gap-3 pt-4 mt-2 border-t border-gray-100">
             <button onclick="markTaskDone('${t.id}')" class="px-4 py-2 rounded-xl text-xs font-bold text-gray-500 bg-gray-100 hover:bg-gray-200 transition-all">Force Close</button>
@@ -965,7 +1140,8 @@ if (type === 'editProfile') {
           </div>
         ` : ''}
       </div>`;
-  }
+ 
+ }
 
   if(type === 'editTask') {
     const t = payload;
@@ -1370,6 +1546,14 @@ if (type === 'editProfile') {
   refreshIcons();
 }
 /* Modal Actions */
+// --- FUNGSI UNTUK MEMBUKA DETAIL TUGAS DARI DASHBOARD ---
+window.openTaskDetailById = function(id) {
+  const t = tasks.find(x => x.id === id);
+  if (t) {
+    openModal('taskDetail', t);
+  }
+};
+// --------------------------------------------------------
 window.markTaskDone = async function(id){ 
   const t = tasks.find(x=>x.id===id); 
   if(t){ 
@@ -1413,7 +1597,9 @@ s.doneDate = toISO(today);
           taskLink: '', 
           divisi: t.divisi, 
           pic: t.pic,    
-          done: false, doneDate: null, proofLink: '', progressDetail: '', obstacle: ''
+          done: false, doneDate: null, proofLink: '', progressDetail: '', obstacle: '',
+          extensions: [],
+          timeline: [{ date: toISO(today), time: new Date().toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'}), title: 'Tugas Turunan Dibuat', desc: 'Dibuat berdasarkan catatan Notulensi rapat.' }]
         };
         taskPromises.push(window.set(window.ref(window.rtdb, "gaspol_tasks/" + newTask.id), newTask));
         validTasksCount++;
@@ -1465,7 +1651,9 @@ window.submitAddTask = async function(e) {
     doneDate: null, 
     proofLink: '', 
     progressDetail: '', 
-    obstacle: ''
+    obstacle: '',
+    extensions: [],
+    timeline: [{ date: toISO(today), time: new Date().toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'}), title: 'Tugas Dibuat', desc: 'Tugas baru diinput ke dalam sistem.' }]
   };
 
   await window.set(window.ref(window.rtdb, "gaspol_tasks/" + newTask.id), newTask);
@@ -1683,9 +1871,50 @@ window.saveTaskProgressOnly = async function(id) {
   t.obstacle = document.getElementById('tp-kendala').value.trim();
   t.proofLink = document.getElementById('tp-link').value.trim();
 
+  // Pencatatan Timeline
+  if(!t.timeline) t.timeline = [];
+  t.timeline.push({ date: toISO(today), time: new Date().toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'}), title: 'Update Progres', desc: detail });
+
   await window.set(window.ref(window.rtdb, "gaspol_tasks/" + id), t);
   alert('Progres berhasil disimpan!');
   openModal('taskDetail', t); 
+};
+
+window.requestExtension = async function(id) {
+  const t = tasks.find(x => x.id === id);
+  if(!t) return;
+  if(!t.progressDetail) return alert('Silakan isi dan Simpan Progres terlebih dahulu sebelum mengajukan perpanjangan deadline!');
+
+  const reqDate = document.getElementById('ext-date').value;
+  const reason = document.getElementById('ext-reason').value.trim();
+  if(!reqDate || !reason) return alert('Tanggal pengajuan dan alasan wajib diisi!');
+
+  if(!t.extensions) t.extensions = [];
+  t.extensions.push({ reqDate, reason, status: 'pending' });
+
+  if(!t.timeline) t.timeline = [];
+  t.timeline.push({ date: toISO(today), time: new Date().toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'}), title: 'Pengajuan Perpanjangan', desc: `Mengajukan ke tgl ${fmtDate(reqDate)}. Alasan: ${reason}` });
+
+  await window.set(window.ref(window.rtdb, "gaspol_tasks/" + id), t);
+  alert('Pengajuan perpanjangan berhasil dikirim!');
+  openModal('taskDetail', t);
+};
+
+window.rejectExtension = async function(id) {
+  const t = tasks.find(x => x.id === id);
+  if(!t) return;
+
+  const pendingIndex = t.extensions.findIndex(ex => ex.status === 'pending');
+  if(pendingIndex > -1) {
+     t.extensions[pendingIndex].status = 'rejected';
+  }
+
+  if(!t.timeline) t.timeline = [];
+  t.timeline.push({ date: toISO(today), time: new Date().toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'}), title: 'Perpanjangan Ditolak', desc: 'Admin menolak pengajuan perpanjangan deadline ini.' });
+
+  await window.set(window.ref(window.rtdb, "gaspol_tasks/" + id), t);
+  alert('Pengajuan perpanjangan berhasil ditolak!');
+  openModal('taskDetail', t);
 };
 
 // Fungsi Final Submit (Tugas Selesai)
@@ -1740,18 +1969,40 @@ window.submitEditSchedule = async function(e, id) {
   return false;
 };
 
-window.toggleNotulensiMenu = function(id){
-  state.notulensiMenuId = state.notulensiMenuId === id ? null : id;
-  // Hanya merender ulang area tabel schedule saja, bukan seluruh tab
+window.toggleUmanMenu = function(id){
+  state.umanMenuId = state.umanMenuId === id ? null : id;
   renderScheduleTableOnly(); 
 };
-window.openTaskDetailById = function(id) {
-  const t = tasks.find(x => x.id === id);
-  if (t) {
-    openModal('taskDetail', t);
-  }
+
+window.toggleNotulensiMenu = function(id) {
+  state.notulensiMenuId = state.notulensiMenuId === id ? null : id;
+  renderScheduleTableOnly();
 };
-/* =========================================================================
+
+// Fungsi Print Umand
+window.printUmand = function(id) {
+  const s = schedules.find(x => x.id === id);
+  if (!s) return;
+  
+  // Tampilkan Notifikasi Sementara
+  alert(`Fungsi Print Umand dijalankan untuk agenda: ${s.nama}.\n\nSistem akan mencetak Notulensi, Daftar Hadir, dan Dokumentasi sesuai dengan template cetak.`);
+  
+  // Nanti masukkan logika cetak (seperti window.print() atau jsPDF) di sini.
+};
+
+window.toggleAllAbsensi = function(cb) {
+  const checkboxes = document.querySelectorAll('.absensi-cb');
+  checkboxes.forEach(c => {
+    c.checked = cb.checked;
+    // Update styling border secara otomatis
+    const label = c.closest('label');
+    if (cb.checked) {
+      label.classList.add('bg-emerald-50/30', 'border-emerald-300');
+    } else {
+      label.classList.remove('bg-emerald-50/30', 'border-emerald-300');
+    }
+  });
+};/* =========================================================================
    LOGIN SCREEN
    ========================================================================= */
 window.startLoginFlow = function() {
@@ -2304,6 +2555,7 @@ function renderLogin(){
   renderLoginCardContent();
 }
 
+
 window.submitLogin = async function(e) {
   e.preventDefault();
 
@@ -2450,47 +2702,47 @@ function renderTopBar(){
   if (cu.role === 'admin') {
     tabs.push(['export', 'Data', 'database']); // Teks diubah menjadi "Data"
   }
-tabs.push(['arsip', 'Arsip', 'archive']);
+  tabs.push(['arsip', 'Arsip', 'archive']);
 
   const activeIndex = tabs.findIndex(t => t[0] === state.activeTab);
   const isHome = state.activeTab === 'home';
 
-  // Logika ukuran dan pergeseran slider dinamis (untuk 3 tab atau 4 tab)
+  // Logika ukuran dan pergeseran slider dinamis yang lebih seimbang
   const tabWidthPct = 100 / tabs.length;
-  const sliderStyle = `width: calc(${tabWidthPct}% - 4px); transform: translateX(${activeIndex * 100}%);`;
+  const sliderStyle = `width: calc(${tabWidthPct}% - 6px); transform: translateX(${activeIndex * 100}%); left: 3px;`;
 
   return `
-  <div class="${isHome ? 'absolute top-0 left-0 w-full bg-transparent text-white' : 'sticky top-0 bg-white border-b border-gray-200 text-gray-900'} z-40 px-4 py-4 md:px-8 md:py-5 transition-all duration-500 shadow-sm">
+  <div class="${isHome ? 'absolute top-0 left-0 w-full bg-transparent text-white' : 'sticky top-0 bg-white border-b border-gray-200 text-gray-900'} z-40 px-4 py-4 md:px-6 lg:px-8 transition-all duration-500 shadow-sm">
     <div class="max-w-[90rem] mx-auto flex items-center justify-between gap-4">
       
-      <div class="flex items-center gap-2.5">
+      <div class="flex items-center gap-2 lg:gap-3 shrink-0">
         <div class="w-10 h-10 rounded-full ${isHome ? 'bg-white/10 border-white/20' : 'bg-gray-100 border-gray-200'} backdrop-blur-md flex items-center justify-center shadow-sm border">
           ${icon('zap','w-5 h-5 text-evergreen-dark')}
         </div>
-        <span class="font-bold text-xl md:text-2xl tracking-wide">GASPOL</span>
+        <span class="font-bold text-xl md:text-2xl tracking-wide hidden sm:block">GASPOL</span>
       </div>
 
-      <!-- Max-width sedikit dilebarkan agar 4 tab tidak terlalu berdesakan -->
-      <div class="hidden md:flex relative max-w-[500px] w-full ${isHome ? 'bg-white/20 border-white/30' : 'bg-gray-100 border-gray-200'} backdrop-blur-md rounded-full p-1.5 shadow-sm border mx-auto">
-        <div id="tab-slider" class="absolute top-1.5 bottom-1.5 left-1.5 ${isHome ? 'bg-white' : 'bg-white shadow-md'} rounded-full transition-transform duration-500 cubic-bezier(0.4, 0, 0.2, 1) z-0" style="${sliderStyle}"></div>
+      <!-- DIPERLEBAR: max-w-[650px] agar 5 tab tidak berdesakan dan rapi -->
+      <div class="hidden md:flex relative max-w-[650px] w-full ${isHome ? 'bg-white/20 border-white/30' : 'bg-gray-100 border-gray-200'} backdrop-blur-md rounded-full p-1.5 shadow-sm border mx-auto">
+        <div id="tab-slider" class="absolute top-1.5 bottom-1.5 ${isHome ? 'bg-white' : 'bg-white shadow-md'} rounded-full transition-transform duration-300 ease-out z-0" style="${sliderStyle}"></div>
         ${tabs.map(([key,label,ic]) => `
-          <button onclick="switchTab('${key}')" id="btn-tab-${key}" class="relative z-10 flex-1 flex items-center justify-center gap-2 py-2 rounded-full text-sm font-bold transition-colors duration-300 ${state.activeTab===key ? 'text-gray-900' : (isHome ? 'text-white hover:text-white/80' : 'text-gray-500 hover:text-gray-900')}">
-            ${icon(ic,'w-4 h-4')}<span class="hidden md:inline">${label}</span>
+          <button onclick="switchTab('${key}')" id="btn-tab-${key}" class="relative z-10 flex-1 flex items-center justify-center gap-2 py-2.5 rounded-full text-sm font-bold transition-colors duration-300 ${state.activeTab===key ? 'text-gray-900' : (isHome ? 'text-white hover:text-white/80' : 'text-gray-500 hover:text-gray-900')}">
+            ${icon(ic,'w-4 h-4')}<span class="hidden lg:inline">${label}</span>
           </button>
         `).join('')}
       </div>
 
-      <div class="flex items-center gap-4">
+      <div class="flex items-center gap-3 lg:gap-4 shrink-0">
         <div class="text-right hidden lg:block">
           <p class="text-sm font-bold leading-tight">${cu.name}</p>
-          <p class="text-xs opacity-80 leading-tight mt-0.5">${cu.role==='admin' ? cu.title : cu.jabatan}</p>
+          <p class="text-[11px] font-medium text-gray-500 leading-tight mt-0.5">${cu.role==='admin' ? cu.title : cu.jabatan}</p>
         </div>
-        <div class="flex items-center gap-3 border-l border-gray-300 pl-4 ml-2">
+        <div class="flex items-center gap-2 lg:gap-3 lg:border-l lg:border-gray-300 lg:pl-4">
           <button onclick="openModal('editProfile')" class="p-2.5 rounded-full ${isHome ? 'bg-white/10 text-white hover:bg-white/20' : 'bg-blue-50 text-blue-600 hover:bg-blue-100'} transition-all shadow-sm flex items-center justify-center" title="Edit Profil Email & Password">
             ${icon('user-cog','w-4.5 h-4.5')}
           </button>
-          <button onclick="logout()" class="px-5 py-2.5 rounded-full bg-evergreen text-gray-900 font-bold text-sm hover:bg-evergreen-hover hover:scale-105 transition-all duration-300 shadow-[0_4px_16px_rgba(163,230,53,0.4)] flex items-center gap-2" title="Keluar">
-            Logout ${icon('log-out','w-4 h-4')}
+          <button onclick="logout()" class="px-4 py-2.5 rounded-full bg-evergreen text-gray-900 font-bold text-sm hover:bg-evergreen-hover hover:scale-105 transition-all duration-300 shadow-sm flex items-center gap-2" title="Keluar">
+            <span class="hidden sm:inline">Logout</span> ${icon('log-out','w-4 h-4')}
           </button>
         </div>
       </div>
@@ -2503,13 +2755,19 @@ tabs.push(['arsip', 'Arsip', 'archive']);
    HERO SECTION (HANYA MUNCUL DI HOME, LEBIH PANJANG KE BAWAH)
    ========================================================================= */
 window.renderHero = function(role, currentUser) {
-  const title = role === 'admin' ? 'Kendalikan Setiap Agenda, Setiap Hari.' : 'Fokus pada Tugas, Sinergi dalam Divisi.';
+  // Mengambil maksimal 2 kata pertama dari nama user
+  const nameParts = currentUser.name.split(' ');
+  const shortName = nameParts.slice(0, 2).join(' ');
+
+  const title = role === 'admin' 
+    ? `Hai ${shortName},<br/>Kendalikan Setiap Agenda.` 
+    : `Hai ${shortName},<br/>Fokus pada Tugas Divisi.`;
+    
   const subtitle = role === 'admin'
     ? 'Pantau jadwal Direktur Utama, progres tugas, dan performa setiap divisi dalam satu ruang kerja yang tenang dan rapi.'
     : `Pantau jadwal harian dan pastikan semua tugas divisi ${currentUser.divisi} terselesaikan dengan baik tepat waktu.`;
 
   return `
-  <!-- Tinggi dinaikkan menjadi h-[80vh] dan diberi pb-32 agar teks lebih jauh dari kartu -->
   <div class="relative w-full h-[80vh] min-h-[650px] overflow-hidden bg-black flex items-center rounded-b-[2.5rem] shadow-xl">
     <img src="Home_Page.jpeg" alt="Background Hero" class="absolute inset-0 w-full h-full object-cover z-0 opacity-70 scale-105" />
     <div class="absolute inset-0 z-0 bg-gradient-to-r from-black/80 via-black/40 to-transparent"></div>
@@ -2536,17 +2794,34 @@ window.switchTab = function(tab){
   
   state.activeTab = tab; 
   
-  document.getElementById('topbar').innerHTML = renderTopBar();
-  
+  localStorage.setItem('gaspol_activeTab', tab);
+
+  // --- EFEK ANIMASI SLIDER MULUS (Tidak Patah-patah) ---
+  // Menggeser slider menggunakan JS secara visual sebelum topbar dirender ulang
+  const cu = state.currentUser;
+  let tabsList = ['home', 'schedule', 'task'];
+  if (cu && cu.role === 'admin') tabsList.push('export');
+  tabsList.push('arsip');
+  const newIndex = tabsList.indexOf(tab);
+
+  const slider = document.getElementById('tab-slider');
+  if (slider) {
+    slider.style.transform = `translateX(${newIndex * 100}%)`;
+  }
+  // -----------------------------------------------------
+
   const content = document.getElementById('tab-content');
   content.style.opacity = '0';
   content.style.transform = 'translateY(15px)';
   
   setTimeout(() => {
+    // Memindahkan renderTopBar ke dalam timeout 
+    // agar tidak memutus animasi pergerakan slider yang sedang meluncur
+    document.getElementById('topbar').innerHTML = renderTopBar();
     renderTabContent(); 
     content.style.opacity = '1';
     content.style.transform = 'translateY(0)';
-  }, 300);
+  }, 250); // Waktu jeda dipersingkat agar lebih responsif
 };
 
 /* =========================================================================
@@ -2874,7 +3149,7 @@ function renderHomeAdmin(){
   const done = tasks.filter(t=>t.done).length;
   const notDone = total - done;
   const overdue = tasks.filter(t=>getTaskStatus(t)==='Overdue').length;
-
+const pendingExtCount = tasks.filter(t => t.extensions && t.extensions.some(ex => ex.status === 'pending')).length;
   const counts = { 'On Progress':0, 'Due Soon':0, 'Overdue':0, 'Completed Late':0, 'Done':0 };
   tasks.forEach(t => counts[getTaskStatus(t)]++);
   const pieData = Object.entries(counts).map(([name,value])=>({name,value}));
@@ -2885,8 +3160,9 @@ function renderHomeAdmin(){
   const dirOnTime = divisionStats.filter(d => d.type === 'direktorat').sort((a,b)=>b.onTimeRate-a.onTimeRate);
   const divOnTime = divisionStats.filter(d => d.type === 'divisi').sort((a,b)=>b.onTimeRate-a.onTimeRate);
   const top5 = divisionStats.filter(d => d.type === 'divisi').sort((a,b)=>b.score-a.score).slice(0,5);
-  const rankMedal = ['bg-amber-400','bg-slate-300','bg-orange-300'];
 
+  const rankMedal = ['bg-amber-400','bg-slate-300','bg-orange-300'];
+const pendingExtTasks = tasks.filter(t => t.extensions && t.extensions.some(ex => ex.status === 'pending'));
   // --- FORMAT TANGGAL BARU (Bulan Lengkap & Update Hari Ini) ---
   const todayLongStr = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
 
@@ -2921,8 +3197,10 @@ function renderHomeAdmin(){
         </div>
       </div>
 
-      <div class="grid grid-cols-1 lg:grid-cols-5 gap-6">
-        <div class="lg:col-span-3 bg-gray-50 rounded-2xl border border-gray-200 p-5 flex flex-col h-[400px]">
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        <!-- 1. Daftar Tugas Biasa -->
+        <div class="bg-gray-50 rounded-2xl border border-gray-200 p-5 flex flex-col h-[400px]">
           <h3 class="font-semibold text-gray-800 mb-4 shrink-0">Daftar Tugas per Divisi &amp; PIC</h3>
           <div class="overflow-y-auto pr-2 space-y-2 flex-1">
             ${tasks.map(t => `
@@ -2932,13 +3210,39 @@ function renderHomeAdmin(){
               </button>`).join('')}
           </div>
         </div>
-        <div class="lg:col-span-2 bg-gray-50 rounded-2xl border border-gray-200 p-5 flex flex-col items-center justify-center">
+
+        <!-- 2. KARTU BARU: Daftar Pengajuan Perpanjangan -->
+        <div class="bg-amber-50/40 rounded-2xl border border-amber-200 p-5 flex flex-col h-[400px] shadow-sm relative overflow-hidden">
+          <div class="absolute top-0 right-0 w-24 h-24 bg-amber-200/30 rounded-bl-full -z-10"></div>
+          <div class="flex items-center justify-between mb-4 shrink-0 z-10">
+            <h3 class="font-semibold text-amber-900 flex items-center gap-2">${icon('clock', 'w-4.5 h-4.5 text-amber-600')} Pengajuan Deadline</h3>
+            <span class="bg-amber-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm">${pendingExtTasks.length}</span>
+          </div>
+          <div class="overflow-y-auto pr-2 space-y-2 flex-1 z-10">
+            ${pendingExtTasks.length === 0 ? '<div class="h-full flex flex-col items-center justify-center opacity-60"><p class="text-sm font-medium text-amber-700">Tidak ada pengajuan perpanjangan waktu.</p></div>' : pendingExtTasks.map(t => {
+              const pendingExt = t.extensions.find(ex => ex.status === 'pending');
+              return `
+              <button onclick='openTaskDetailById("${t.id}")' class="w-full text-left flex items-start gap-3 p-3 rounded-xl bg-white border border-amber-100 hover:border-amber-400 hover:shadow-md transition-all duration-200 active:scale-[0.98]">
+                <div class="min-w-0 flex-1">
+                  <p class="text-sm font-bold text-gray-800 line-clamp-1">${t.name}</p>
+                  <p class="text-[10px] text-gray-500 mt-1 flex items-center gap-1.5">${icon('calendar', 'w-3 h-3')} Req: <span class="font-bold text-amber-600">${fmtDate(pendingExt.reqDate)}</span></p>
+                  <p class="text-[10px] text-gray-400 mt-0.5 truncate bg-gray-50 p-1.5 rounded border border-gray-100">Alasan: ${pendingExt.reason}</p>
+                </div>
+                ${icon('chevron-right', 'w-4 h-4 text-amber-300 mt-1 shrink-0')}
+              </button>`
+            }).join('')}
+          </div>
+        </div>
+
+        <!-- 3. Progres Tugas -->
+        <div class="bg-gray-50 rounded-2xl border border-gray-200 p-5 flex flex-col items-center justify-center">
           <h3 class="font-semibold text-gray-800 w-full text-left mb-2">Progres Tugas</h3>
           ${donutChartHtml(pieData)}
           <div class="grid grid-cols-2 gap-3 mt-4 w-full">
-            ${pieData.map(d => `<div class="flex items-center gap-2 text-xs font-medium text-gray-600 bg-white px-3 py-2 rounded-lg border border-gray-100"><span class="w-2.5 h-2.5 rounded-full ${TASK_STATUS_STYLE[d.name].dot}"></span>${d.name} (${d.value})</div>`).join('')}
+            ${pieData.map(d => `<div class="flex items-center gap-2 text-xs font-medium text-gray-600 bg-white px-3 py-2 rounded-lg border border-gray-100 shadow-sm"><span class="w-2.5 h-2.5 rounded-full shrink-0 ${TASK_STATUS_STYLE[d.name].dot}"></span><span class="truncate">${d.name} (${d.value})</span></div>`).join('')}
           </div>
         </div>
+
       </div>
 
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -3249,13 +3553,25 @@ function renderScheduleCards(filtered, isAdmin) {
         ? 'px-4 py-2 rounded-xl bg-blue-50 text-blue-600 hover:bg-blue-100 text-sm font-bold transition-all flex items-center justify-center gap-2 border border-blue-200 shadow-sm active:scale-95 w-full sm:w-auto' 
         : 'px-4 py-2 rounded-xl bg-gray-50 text-gray-500 hover:bg-gray-100 hover:text-gray-700 text-sm font-bold transition-all flex items-center justify-center gap-2 border border-gray-200 shadow-sm active:scale-95 w-full sm:w-auto';
 
+      // Logika Truncate Nama Peserta
+      let usersDisplay = '-';
+      if (s.users && s.users.length > 0) {
+        if (s.divisi.length === DIVISIONS.length) {
+          usersDisplay = '<span class="font-bold text-evergreen-dark">All Leader</span>';
+        } else if (s.users.length > 2) {
+          usersDisplay = `${s.users[0]}, ${s.users[1]} <span class="bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded text-[10px] ml-1 font-bold">+${s.users.length - 2}</span>`;
+        } else {
+          usersDisplay = s.users.join(', ');
+        }
+      }
+
       let notulensiHtml = `
-        <div class="flex flex-col gap-2 shrink-0 mt-3 sm:mt-0 w-full sm:w-auto">
+        <div class="flex flex-wrap gap-2 shrink-0 mt-3 sm:mt-0 w-full sm:w-auto justify-start sm:justify-end">
           
           <!-- TOMBOL NOTULENSI -->
-          <div class="relative w-full sm:w-auto" onclick="event.stopPropagation()">
+          <div class="relative w-auto" onclick="event.stopPropagation()">
             <button ${notulensiAction} class="${btnClass}">
-              ${icon(btnIcon, 'w-4 h-4')} <span class="hidden sm:inline">${btnText}</span> ${isAdmin ? icon('chevron-down', 'w-3 h-3 ml-1 opacity-70') : ''}
+              ${icon(btnIcon, 'w-4 h-4')} <span class="hidden lg:inline">${btnText}</span> ${isAdmin ? icon('chevron-down', 'w-3 h-3 ml-1 opacity-70') : ''}
             </button>
             
             ${(isAdmin && state.notulensiMenuId === s.id) ? `
@@ -3266,15 +3582,25 @@ function renderScheduleCards(filtered, isAdmin) {
           </div>
 
           <!-- TOMBOL DOKUMENTASI -->
-          <button onclick='event.stopPropagation(); openModal("dokumentasi", schedules.find(x=>x.id==="${s.id}"))' class="${s.dokumentasi && s.dokumentasi.length > 0 ? 'px-4 py-2 rounded-xl bg-purple-50 text-purple-600 hover:bg-purple-100 text-sm font-bold transition-all flex items-center justify-center gap-2 border border-purple-200 shadow-sm active:scale-95 w-full sm:w-auto' : 'px-4 py-2 rounded-xl bg-gray-50 text-gray-500 hover:bg-gray-100 hover:text-gray-700 text-sm font-bold transition-all flex items-center justify-center gap-2 border border-gray-200 shadow-sm active:scale-95 w-full sm:w-auto'}">
-            ${icon('camera', 'w-4 h-4')} <span class="hidden sm:inline">${s.dokumentasi && s.dokumentasi.length > 0 ? 'Lihat Dokumentasi' : (isAdmin ? 'Isi Dokumentasi' : 'Belum Ada Foto')}</span>
+          <button onclick='event.stopPropagation(); openModal("dokumentasi", schedules.find(x=>x.id==="${s.id}"))' class="${s.dokumentasi && s.dokumentasi.length > 0 ? 'px-4 py-2 rounded-xl bg-purple-50 text-purple-600 hover:bg-purple-100 text-sm font-bold transition-all flex items-center justify-center gap-2 border border-purple-200 shadow-sm active:scale-95 w-auto' : 'px-4 py-2 rounded-xl bg-gray-50 text-gray-500 hover:bg-gray-100 hover:text-gray-700 text-sm font-bold transition-all flex items-center justify-center gap-2 border border-gray-200 shadow-sm active:scale-95 w-auto'}">
+            ${icon('camera', 'w-4 h-4')} <span class="hidden lg:inline">${s.dokumentasi && s.dokumentasi.length > 0 ? 'Lihat Dokumentasi' : (isAdmin ? 'Isi Dokumentasi' : 'Belum Ada Foto')}</span>
           </button>
 
+          <!-- TAMBAHKAN TOMBOL ABSENSI (HANYA ADMIN) -->
+          ${isAdmin ? `
+          <button onclick='event.stopPropagation(); openModal("absensi", schedules.find(x=>x.id==="${s.id}"))' class="px-4 py-2 rounded-xl bg-emerald-50 text-emerald-600 hover:bg-emerald-100 text-sm font-bold transition-all flex items-center justify-center gap-2 border border-emerald-200 shadow-sm active:scale-95 w-auto">
+            ${icon('check-square', 'w-4 h-4')} <span class="hidden lg:inline">Absensi</span>
+          </button>` : ''}
+
+          <!-- TOMBOL UMAND -->
+          <button onclick='event.stopPropagation(); printUmand("${s.id}")' class="px-4 py-2 rounded-xl bg-gray-900 text-white hover:bg-black text-sm font-bold transition-all flex items-center justify-center gap-2 shadow-sm active:scale-95 w-auto">
+            ${icon('printer', 'w-4 h-4')} <span class="hidden lg:inline">Umand</span>
+          </button>
         </div>
       `;
 
       html += `
-      <div class="flex flex-col sm:flex-row items-start sm:items-center gap-4 sm:gap-6 pb-5 border-b border-gray-200 last:border-b-0 last:pb-0 hover:bg-gray-50 p-3 -mx-3 rounded-2xl transition-all cursor-pointer" onclick='openModal("scheduleDetail", schedules.find(x=>x.id==="${s.id}"))'>
+      <div class="flex flex-col sm:flex-row items-start sm:items-center gap-4 sm:gap-6 pb-4 border-b border-gray-200 last:border-b-0 last:pb-0 hover:bg-gray-50 p-3 -mx-3 rounded-2xl transition-all cursor-pointer" onclick='openModal("scheduleDetail", schedules.find(x=>x.id==="${s.id}"))'>
         
         <div class="bg-white border border-gray-200 rounded-2xl px-4 py-3 min-w-[95px] text-center shadow-sm shrink-0">
           <span class="text-xs font-bold text-gray-500 uppercase tracking-wider block">${dInfo.dayName}</span>
@@ -3283,7 +3609,6 @@ function renderScheduleCards(filtered, isAdmin) {
         </div>
 
         <div class="flex-1 min-w-0 w-full">
-          <!-- DI SINI PERUBAHANNYA: items-start diubah menjadi items-center -->
           <div class="flex items-center justify-between gap-4 mb-2 flex-wrap sm:flex-nowrap">
             <div class="flex items-center gap-2.5 flex-wrap">
               ${isOnline ? `<span class="p-1.5 bg-blue-100 text-blue-600 rounded-lg shadow-sm" title="Zoom Meeting">${icon('video', 'w-4 h-4')}</span>` : `<span class="p-1.5 bg-gray-100 text-gray-600 rounded-lg shadow-sm" title="Offline Meeting">${icon('users', 'w-4 h-4')}</span>`}
@@ -3292,28 +3617,22 @@ function renderScheduleCards(filtered, isAdmin) {
             ${notulensiHtml}
           </div>
           
-          <div class="space-y-2 text-sm text-gray-600 mb-4 mt-2">
+          <div class="flex items-center gap-4 text-sm text-gray-600 mb-3 flex-wrap">
             <div class="flex items-center gap-2">
-              <span class="text-gray-400 font-bold">•</span>
-              <span class="font-bold text-gray-900">${s.waktu} WIB</span>
+              <span class="font-bold text-gray-900">${icon('clock', 'w-4 h-4 inline-block text-gray-400 -mt-0.5 mr-1')} ${s.waktu} WIB</span>
             </div>
             <div class="flex items-center gap-2">
-              <span>${icon('map-pin', 'w-3.5 h-3.5 text-gray-400')}</span>
+              <span>${icon('map-pin', 'w-4 h-4 text-gray-400')}</span>
               <span class="truncate">${s.lokasi || '-'}</span>
             </div>
-           ${s.refLink ? `
-            <div class="flex items-center gap-2 mt-2 pt-2 border-t border-dashed border-gray-200">
-              <span>${icon('link', 'w-3.5 h-3.5 text-blue-500')}</span>
-              <a href="${s.refLink}" target="_blank" class="truncate text-blue-600 hover:text-blue-800 hover:underline font-medium text-xs">Materi: ${s.refLink}</a>
-            </div>` : ''}
           </div>
 
-          <!-- BOTTOM ROW: USERS, DIVISI & STATUS (Dibuat agar teks tidak terpotong) -->
-          <div class="flex flex-wrap items-center justify-between gap-4 pt-3 border-t border-gray-100 text-xs text-gray-500">
+          <!-- BOTTOM ROW: USERS, DIVISI & STATUS -->
+          <div class="flex flex-wrap items-center justify-between gap-4 pt-2 border-t border-gray-100 text-xs text-gray-500">
             <div class="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-6 flex-wrap">
               <span class="flex items-center gap-1.5 text-gray-700 font-medium">
                 ${icon('user', 'w-3.5 h-3.5 shrink-0')} 
-                <span>${s.users.length > 0 ? s.users.join(', ') : '-'}</span>
+                <span>${usersDisplay}</span>
               </span>
               <span class="flex items-center gap-1.5 text-gray-700 font-medium">
                 ${icon('tag', 'w-3.5 h-3.5 shrink-0')} 
