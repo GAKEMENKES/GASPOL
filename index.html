@@ -6,6 +6,7 @@
 <title>GASPOL - Modern Dashboard</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://unpkg.com/lucide@latest"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -34,6 +35,8 @@
   /* ANIMASI MODERN */
   @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
   @keyframes slideUp { from { opacity: 0; transform: translateY(20px) } to { opacity: 1; transform: translateY(0) } }
+  @keyframes slideLeft { from { transform: translateX(100%); } to { transform: translateX(0); } }
+  .slide-left { animation: slideLeft 0.35s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
   @keyframes pageEnter { 
     from { opacity: 0; transform: translateY(30px) scale(0.98); } 
     to { opacity: 1; transform: translateY(0) scale(1); } 
@@ -91,6 +94,30 @@
   
   .stat-card { border-radius:1rem; padding:1.25rem; color:#ffffff; box-shadow:0 10px 24px -10px rgba(0,0,0,.15); transition:all .3s; }
   .stat-card:hover { transform:translateY(-4px); box-shadow:0 16px 28px -10px rgba(0,0,0,.2); }
+
+/* ANIMASI CUSTOM TOAST ALERT */
+  @keyframes slideInRight { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+  @keyframes fadeOutRight { from { transform: translateX(0); opacity: 1; } to { transform: translateX(100%); opacity: 0; } }
+  .toast-enter { animation: slideInRight 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) forwards; }
+  .toast-leave { animation: fadeOutRight 0.3s ease-in forwards; }
+  #toast-container { position: fixed; top: 1.5rem; right: 1.5rem; z-index: 99999; display: flex; flex-direction: column; gap: 0.75rem; pointer-events: none; }
+/* Label penulis per paragraf notulensi (bukan bagian teks, tidak ikut ter-copy) */
+div[data-by]::after {
+  content: "Notulen oleh: " attr(data-by);
+  display: block; margin-top: 2px;
+  font-size: 10px; font-style: italic; color: #9ca3af;
+  user-select: none; pointer-events: none;
+}
+
+/* Top bar freeze + mobile */
+#topbar { position: sticky; top: 0; z-index: 40; }
+@media (max-width: 767px) {
+  body.has-mnav { padding-bottom: 76px; }
+  .field-input { font-size: 16px; }              /* cegah zoom otomatis di iPhone */
+  #toast-container { left: 1rem; right: 1rem; top: 1rem; }
+  #toast-container > div { max-width: none; }
+}
+
 </style>
 </head>
 <body class="bg-[#1a1a1a] text-white">
@@ -159,7 +186,29 @@ window.EmailAuthProvider = EmailAuthProvider;
 window.reauthenticateWithCredential = reauthenticateWithCredential;
 window.updateEmail = updateEmail;
 window.updatePassword = updatePassword;
-
+// MENGUBAH ALERT KAKU MENJADI MODERN TOAST 
+  document.body.insertAdjacentHTML('beforeend', '<div id="toast-container"></div>');
+  window.alert = function(message) {
+    const container = document.getElementById('toast-container');
+    const toast = document.createElement('div');
+    toast.className = 'bg-gray-900 text-white px-5 py-3.5 rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.3)] flex items-start gap-3 text-sm font-medium toast-enter max-w-sm border border-gray-700/50 backdrop-blur-md pointer-events-auto';
+    toast.innerHTML = `
+      <div class="bg-evergreen/20 p-1.5 rounded-lg shrink-0 mt-0.5">
+        <svg class="w-5 h-5 text-evergreen" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+      </div>
+      <p class="leading-relaxed flex-1">${String(message).replace(/\n/g, '<br>')}</p>
+      <button onclick="this.parentElement.classList.replace('toast-enter','toast-leave'); setTimeout(()=>this.parentElement.remove(),300)" class="text-gray-400 hover:text-white transition-colors p-1 shrink-0 -mr-1">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"></path></svg>
+      </button>
+    `;
+    container.appendChild(toast);
+    setTimeout(() => {
+      if(toast.parentElement) {
+        toast.classList.replace('toast-enter', 'toast-leave');
+        setTimeout(() => toast.remove(), 300);
+      }
+    }, 4000); // Hilang otomatis dalam 4 detik
+  };
   window.CLOUDINARY_URL = "https://api.cloudinary.com/v1_1/i44xkscy/image/upload";
   window.CLOUDINARY_PRESET = "GASPOL"; 
 
@@ -182,6 +231,35 @@ window.signOut =
 window.createUserWithEmailAndPassword =
   createUserWithEmailAndPassword;
 
+// --- FUNGSI NAVIGASI TAB WORKSPACE ---
+window.switchWorkspaceTab = function(tabName) {
+  const tabs = ['notulensi', 'absensi', 'dokumentasi'];
+  const colors = { notulensi: 'blue', absensi: 'emerald', dokumentasi: 'purple' };
+
+  tabs.forEach(t => {
+    const pane = document.getElementById('ws-tab-' + t);
+    const btn = document.getElementById('ws-btn-' + t);
+    if (!pane || !btn) return;
+
+    if (t === tabName) {
+      // Fade In Pane
+      pane.classList.remove('opacity-0', 'z-0', 'pointer-events-none');
+      pane.classList.add('opacity-100', 'z-10');
+      // Set Active Button Colors
+      const c = colors[t];
+      btn.className = `shrink-0 md:shrink w-auto md:w-full flex items-center p-3 rounded-xl transition-all bg-${c}-50 border-${c}-200 border text-${c}-700 shadow-sm`;
+      btn.querySelector('.ws-icon-bg').className = `ws-icon-bg p-2 rounded-lg mr-3 bg-${c}-500 text-white`;
+    } else {
+      // Fade Out Pane
+      pane.classList.remove('opacity-100', 'z-10');
+      pane.classList.add('opacity-0', 'z-0', 'pointer-events-none');
+      // Set Inactive Button Colors
+      btn.className = `shrink-0 md:shrink w-auto md:w-full flex items-center p-3 rounded-xl transition-all bg-transparent border border-transparent text-gray-600 hover:bg-gray-50`;
+      btn.querySelector('.ws-icon-bg').className = `ws-icon-bg p-2 rounded-lg mr-3 bg-gray-100 text-gray-500`;
+    }
+  });
+};
+
 window.submitAbsensi = async function(e, id) {
   e.preventDefault();
   const s = schedules.find(x => x.id === id);
@@ -193,6 +271,225 @@ window.submitAbsensi = async function(e, id) {
     closeModal();
   }
   return false;
+};
+
+window.renderAbsensiList = function() {
+  const container = document.getElementById('absensi-list');
+  if(!container) return;
+  
+  if(window.tempAbsensi.length === 0) {
+    container.innerHTML = '<p class="text-sm text-gray-400 italic w-full text-center py-6">Belum ada peserta yang diabsen.</p>';
+    return;
+  }
+  
+  container.innerHTML = window.tempAbsensi.map(name => `
+    <div class="flex items-center gap-2 bg-white border border-emerald-200 text-emerald-700 px-3 py-1.5 rounded-lg shadow-sm text-sm font-bold">
+      ${name}
+      <button onclick="removeTempAbsensi('${name}')" class="text-emerald-400 hover:text-rose-500 transition-colors ml-1 p-0.5 rounded-full hover:bg-rose-50">${icon('x', 'w-3.5 h-3.5')}</button>
+    </div>
+  `).join('');
+  refreshIcons();
+};
+
+window.removeTempAbsensi = function(name) {
+  window.tempAbsensi = window.tempAbsensi.filter(n => n !== name);
+  renderAbsensiList();
+};
+
+window.addTempAbsensi = function(name) {
+  if(name && !window.tempAbsensi.includes(name)) {
+    window.tempAbsensi.push(name);
+    renderAbsensiList();
+  }
+  document.getElementById('absensi-search').value = '';
+  document.getElementById('absensi-search-results').classList.add('hidden');
+};
+
+window.searchAbsensi = function(e, scheduleId) {
+  const val = e.target.value.toLowerCase().trim();
+  const resContainer = document.getElementById('absensi-search-results');
+  if(!val) { resContainer.classList.add('hidden'); return; }
+
+  // Cocokkan data user di sistem (batas 5 hasil teratas yang belum diabsen)
+  const matches = USERS.filter(u => u.name.toLowerCase().includes(val) && !window.tempAbsensi.includes(u.name)).slice(0, 5);
+
+  let html = matches.map(u => `
+    <div class="p-3 hover:bg-gray-50 cursor-pointer border-b border-gray-100 flex flex-col" onclick="addTempAbsensi('${u.name}')">
+      <span class="font-bold text-gray-800 text-sm">${u.name}</span>
+      <!-- Tadi u.divisi, sekarang diubah jadi u.jabatan -->
+      <span class="text-[10px] text-gray-500">${u.jabatan}</span> 
+    </div>
+  `).join('');
+
+  // Tombol tambah tamu manual (Bebas ketik di luar sistem)
+  html += `
+    <div class="p-3 bg-blue-50 hover:bg-blue-100 cursor-pointer text-blue-700 text-sm font-bold flex items-center gap-2 transition-colors" onclick="addTempAbsensi('${e.target.value.trim()}')">
+      ${icon('plus-circle', 'w-4 h-4')} Tambah "${e.target.value.trim()}" (Tamu Luar)
+    </div>
+  `;
+
+  resContainer.innerHTML = html;
+  resContainer.classList.remove('hidden');
+  refreshIcons();
+
+  if(e.key === 'Enter') {
+    addTempAbsensi(e.target.value.trim());
+  }
+};
+// --- Fungsi Navigasi Tab dalam Workspace ---
+window.changeWorkspaceTab = function(scheduleId, tab) {
+  const s = schedules.find(x => x.id === scheduleId);
+  if (s) {
+    if (tab === 'absensi') { 
+      // Reset draft agar murni sesuai kondisi DB setiap kali tab dibuka
+      window.tempAbsensi = [...(s.hadir || [])]; 
+    }
+    openModal('scheduleWorkspace', { schedule: s, activeTab: tab });
+  }
+};
+
+// --- FUNGSI RENDER & UPLOAD DOKUMENTASI SEMENTARA ---
+window.renderWorkspaceDokumentasi = function(isAdmin, scheduleId) {
+  const container = document.getElementById('ws-dok-container');
+  if(!container) return;
+  const docs = window.tempDokumentasi || [];
+  
+  let html = docs.map((imgBase64, idx) => `
+    <div class="relative group cursor-pointer" onclick="openModal('imagePreview', '${imgBase64}')">
+      <img src="${imgBase64}" class="w-32 h-32 md:w-48 md:h-48 object-cover rounded-xl border border-gray-200 shadow-sm hover:scale-105 transition-transform" />
+      ${isAdmin ? `<button onclick="event.stopPropagation(); hapusDokumentasiWorkspace('${scheduleId}',${idx})" class="absolute -top-2 -right-2 bg-rose-500 text-white rounded-full p-1.5 opacity-0 group-hover:opacity-100 transition-opacity shadow-md" title="Hapus Foto">${icon('x', 'w-4 h-4')}</button>` : ''}
+    </div>
+  `).join('');
+  
+  if (isAdmin && docs.length < 2) {
+    html += `
+    <label 
+      ondragover="event.preventDefault(); this.classList.add('border-purple-500', 'bg-purple-50', 'text-purple-600')"
+      ondragleave="event.preventDefault(); this.classList.remove('border-purple-500', 'bg-purple-50', 'text-purple-600')"
+      ondrop="event.preventDefault(); this.classList.remove('border-purple-500', 'bg-purple-50', 'text-purple-600'); handleDropDokumentasi(event, '${scheduleId}')"
+      class="w-32 h-32 md:w-48 md:h-48 flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-xl cursor-pointer hover:border-purple-400 hover:bg-purple-50 hover:text-purple-500 transition-all text-gray-400">
+      ${icon('upload-cloud', 'w-8 h-8')}
+      <span class="text-xs font-bold mt-2">Upload/Drag Foto</span>
+      <input type="file" accept="image/*" class="hidden" onchange="handleUploadDokumentasiWorkspace(this, '${scheduleId}')" />
+    </label>`;
+  }
+  window.handleDropDokumentasi = function(e, scheduleId) {
+    if(e.dataTransfer.files && e.dataTransfer.files[0]) {
+        handleUploadDokumentasiWorkspace({ files: e.dataTransfer.files }, scheduleId);
+    }
+};
+  container.innerHTML = html;
+  const counter = document.getElementById('ws-dok-counter');
+  if(counter) counter.innerText = docs.length + ' / 2';
+  refreshIcons();
+};
+
+window.handleUploadDokumentasiWorkspace = async function(input, scheduleId) {
+  if(input.files && input.files[0]) {
+    if(window.tempDokumentasi.length >= 2) return alert('Maksimal hanya 2 foto!');
+    
+    // Tampilkan notifikasi kompresi
+    const toastContainer = document.getElementById('toast-container');
+    if(toastContainer) alert("Sedang memproses dan mengompres foto...");
+
+    try {
+      // 1. Lakukan kompresi file otomatis (Maksimal 1280px, Kualitas 70%)
+      const compressedFile = await window.compressImage(input.files[0], 1280, 1280, 0.7);
+      
+      // 2. Siapkan file yang sudah dikompres untuk diupload
+      const formData = new FormData();
+      formData.append("file", compressedFile);
+      formData.append("upload_preset", window.CLOUDINARY_PRESET);
+
+      // 3. Kirim ke Cloudinary
+      const res = await fetch(window.CLOUDINARY_URL, { method: "POST", body: formData });
+      const data = await res.json();
+      
+      if(data.secure_url) {
+        // --- SISIPKAN KODE INI ---
+        let optimizedUrl = data.secure_url;
+        if (optimizedUrl.includes('/upload/')) {
+            optimizedUrl = optimizedUrl.replace('/upload/', '/upload/f_auto,q_auto/');
+        }
+        // -------------------------
+
+        // Gunakan optimizedUrl alih-alih data.secure_url biasa
+        window.tempDokumentasi.push(optimizedUrl);
+        window.renderWorkspaceDokumentasi(true, scheduleId); 
+      }
+    } catch (err) { 
+      console.error(err);
+      alert("Gagal memproses atau mengupload gambar."); 
+    }
+  }
+};
+
+window.hapusDokumentasiWorkspace = function(scheduleId, index) {
+  window.tempDokumentasi.splice(index, 1);
+  window.renderWorkspaceDokumentasi(true, scheduleId);
+};
+
+// --- FUNGSI UNIFIED SAVE (SIMPAN SEMUA) ---
+window.submitWorkspace = async function(scheduleId) {
+  const s = schedules.find(x => x.id === scheduleId);
+  if (!s) return;
+
+  const canN = canEditNotulensi(s), canA = canEditAbsensi(s), canD = canEditDokumentasi(s);
+  if (!canN && !canA && !canD) return alert('Akses ditolak: Anda tidak memiliki hak mengubah agenda ini.');
+
+  const updates = {};
+
+  // 1. Notulensi + penanda penulis
+  if (canN) {
+    const editor = document.getElementById('notulensi-editor');
+    if (editor) {
+      updates.notulensi = editor.innerHTML;
+      try {
+        const bySnap = await window.get(window.ref(window.rtdb, 'gaspol_live/' + scheduleId + '/by'));
+        const by = Object.assign({}, s.notulensiBy || {}, bySnap.exists() ? bySnap.val() : {});
+        if (Object.keys(by).length) updates.notulensiBy = by;
+      } catch (e) { console.error(e); }
+    }
+  }
+  // 2. Absensi (hanya penyelenggara) & Dokumentasi (semua sekretaris)
+  if (canA) updates.hadir = window.tempAbsensi || [];
+  if (canD) updates.dokumentasi = window.tempDokumentasi || [];
+
+  // 3. Status Done hanya oleh penyelenggara (perilaku lama dipertahankan)
+  if (isScheduleOwner(s)) { updates.status = 'Done'; updates.doneDate = toISO(today); }
+
+  // 4. Tugas turunan (tidak berubah, hanya jika boleh edit notulensi)
+  let validTasksCount = 0;
+  if (canN && !isLiteAdmin() && state.tempTasks && state.tempTasks.length > 0) {
+    const taskPromises = [];
+    state.tempTasks.forEach((t, index) => {
+      if (t.name && t.divisi.length > 0 && t.pic.length > 0 && t.deadline) {
+        const newTask = {
+          id: 't' + Date.now() + index,
+          inputDate: toISO(today), name: t.name, desc: `Tugas turunan dari hasil rapat: ${s.nama}`,
+          scheduleRefId: scheduleId, deadline: t.deadline, deadlineTime: '23:59', isArchived: false,
+          taskLink: '', divisi: t.divisi, pic: t.pic, done: false, doneDate: null, proofLink: '',
+          progressDetail: '', obstacle: '', extensions: [],
+          timeline: [{ date: toISO(today), time: new Date().toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'}), title: 'Tugas Turunan Dibuat', desc: 'Dibuat berdasarkan catatan Notulensi rapat.' }]
+        };
+        taskPromises.push(window.set(window.ref(window.rtdb, "gaspol_tasks/" + newTask.id), newTask));
+        validTasksCount++;
+      }
+    });
+    await Promise.all(taskPromises);
+  }
+
+  await window.update(window.ref(window.rtdb, "gaspol_schedules/" + scheduleId), updates);
+  if (updates.notulensi !== undefined) {
+    window.set(window.ref(window.rtdb, 'gaspol_live/' + scheduleId + '/html'), updates.notulensi);
+  }
+
+  if (canN) localStorage.removeItem('gaspol_draft_' + scheduleId);
+  state.tempTasks = []; state.activeTempTaskId = null;
+  window.tempAbsensi = []; window.tempDokumentasi = [];
+
+  closeModal();
+  alert(validTasksCount > 0 ? `Seluruh data disimpan & ${validTasksCount} Tugas Turunan didistribusikan!` : `Perubahan Workspace berhasil disimpan!`);
 };
 
   // Menggunakan query untuk memfilter data langsung dari server Firebase
@@ -208,10 +505,11 @@ onValue(tasksQuery, (snapshot) => {
       t.divisi = t.divisi || [];
       t.pic = t.pic || [];
 
-      // Logika auto-archive tetap berjalan, tapi beban download server sudah jauh berkurang
-      if (t.done && t.doneDate) {
-        const doneDateNum = new Date(t.doneDate + 'T00:00:00').getTime();
-        const diffDays = Math.round((todayNum - doneDateNum) / 86400000);
+      // Tugas hanya akan terarsip jika sudah disetujui admin (bukan waiting approval)
+      // dan terarsip H+3 dihitung dari tanggal DEADLINE.
+      if (t.done && t.reviewStatus !== 'waiting') {
+        const deadlineNum = new Date(t.deadline + 'T00:00:00').getTime();
+        const diffDays = Math.round((todayNum - deadlineNum) / 86400000);
         if (diffDays >= 3) {
           t.isArchived = true;
           set(ref(rtdb, "gaspol_tasks/" + t.id), t);
@@ -221,6 +519,8 @@ onValue(tasksQuery, (snapshot) => {
       window.tasks.push(t);
     });
   }
+  window._rawTasks = window.tasks;
+window.applyScopeFilter();
   if (window.state && window.state.currentUser && typeof renderTabContent === 'function') {
       renderTabContent();
     }
@@ -258,6 +558,8 @@ onValue(tasksQuery, (snapshot) => {
         window.schedules.push(s);
       });
     }
+    window._rawSchedules = window.schedules;
+window.applyScopeFilter();
     if(window.state && window.state.currentUser) { if(typeof renderTabContent === 'function') renderTabContent(); }
   });
 
@@ -287,7 +589,7 @@ onValue(tasksQuery, (snapshot) => {
         const snapshot = await get(child(dbRef, "gaspol_users/" + user.uid));
         
         if (snapshot.exists()) {
-          window.state.currentUser = snapshot.val();
+          window.state.currentUser = window.normalizeUser ? window.normalizeUser(snapshot.val()) : snapshot.val();
         } else {
           window.state.currentUser = null;
         }
@@ -298,7 +600,7 @@ onValue(tasksQuery, (snapshot) => {
     } else {
       window.state.currentUser = null;
     }
-
+    window.applyScopeFilter();
     // Panggil mountApp() setelah status login pasti terverifikasi
     if (typeof mountApp === 'function') {
       mountApp();
@@ -306,44 +608,117 @@ onValue(tasksQuery, (snapshot) => {
   });
 </script>
 
-</script>
-
 <script>
 /* =========================================================================
    UTIL & DATA
    ========================================================================= */
-const today = new Date(); today.setHours(0,0,0,0);
+// --- FUNGSI AUTO KOMPRES GAMBAR ---
+window.compressImage = function(file, maxWidth = 1280, maxHeight = 1280, quality = 0.7) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = function(event) {
+      const img = new Image();
+      img.src = event.target.result;
+      img.onload = function() {
+        let width = img.width;
+        let height = img.height;
+
+        // Hitung rasio untuk memperkecil ukuran jika melebihi batas maksimal
+        if (width > height) {
+          if (width > maxWidth) {
+            height = Math.round(height * (maxWidth / width));
+            width = maxWidth;
+          }
+        } else {
+          if (height > maxHeight) {
+            width = Math.round(width * (maxHeight / height));
+            height = maxHeight;
+          }
+        }
+
+        // Gambar ulang ke dalam canvas dengan ukuran baru
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+
+        // Convert canvas kembali menjadi file Blob/JPG
+        canvas.toBlob((blob) => {
+          const newFile = new File([blob], file.name, {
+            type: 'image/jpeg',
+            lastModified: Date.now()
+          });
+          resolve(newFile);
+        }, 'image/jpeg', quality);
+      };
+      img.onerror = error => reject(error);
+    };
+    reader.onerror = error => reject(error);
+  });
+};
+
+   const today = new Date(); today.setHours(0,0,0,0);
 function addDays(n){ const d = new Date(today); d.setDate(d.getDate()+n); return d.toISOString().slice(0,10); }
-function toISO(d){ return d.toISOString().slice(0,10); }
+  function toISO(d){ const o = d.getTimezoneOffset()*60000; return new Date(d.getTime()-o).toISOString().slice(0,10); }
 function fmtDate(iso){ if(!iso) return '-'; const d = new Date(iso+'T00:00:00'); return d.toLocaleDateString('id-ID',{day:'numeric',month:'short',year:'numeric'}); }
 function fmtDateShort(iso){ const d = new Date(iso+'T00:00:00'); return d.toLocaleDateString('id-ID',{day:'numeric',month:'short'}); }
 function daysDiff(iso){ const d = new Date(iso+'T00:00:00'); return Math.round((d-today)/86400000); }
-
+function getMonthNameID(dateObj) {
+  const months = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+  return months[dateObj.getMonth()];
+}
+function getWeekOfMonth(dateObj) {
+  return Math.ceil(dateObj.getDate() / 7); // tanggal 1-7 = minggu 1, 8-14 = minggu 2, dst.
+}
 function getTaskStatus(t){ 
   if(t.done) {
-    // Jika tanggal selesai (doneDate) lebih dari deadline, maka Overdue Done
-    if(t.doneDate && t.doneDate > t.deadline) {
-      return 'Completed Late';
-    }
-    return 'Done';
+    // Jika menggunakan sistem review terbaru
+    if(t.reviewStatus === 'waiting') return 'Waiting Approval';
+    // Jika sudah disetujui atau tugas lama yang langsung selesai
+    if(t.doneDate && t.doneDate > t.deadline) return 'Completed Late';
+    return 'Done'; 
   }
+  if(t.reviewStatus === 'revised') return 'Need Revision';
   const diff = daysDiff(t.deadline); 
   if(diff<0) return 'Overdue'; 
   if(diff<=3) return 'Due Soon'; 
   return 'On Progress'; 
 }
 
+const TASK_STATUS_STYLE = {
+  "On Progress": { chip:"bg-slate-100 text-slate-600", dot:"bg-slate-400", bar:"bg-slate-400", hex:"#94a3b8" },
+  "Due Soon": { chip:"bg-amber-50 text-amber-700", dot:"bg-amber-400", bar:"bg-amber-400", hex:"#fbbf24" },
+  "Overdue": { chip:"bg-rose-50 text-rose-600", dot:"bg-rose-400", bar:"bg-rose-400", hex:"#fb7185" },
+  "Completed Late": { chip:"bg-pink-50 text-pink-700", dot:"bg-pink-500", bar:"bg-pink-500", hex:"#ec4899" },
+  "Done": { chip:"bg-evergreen-light/50 text-evergreen-dark", dot:"bg-evergreen", bar:"bg-evergreen", hex:"#A3E635" },
+  "Waiting Approval": { chip:"bg-blue-100 text-blue-700", dot:"bg-blue-500", bar:"bg-blue-500", hex:"#3b82f6" },
+  "Need Revision": { chip:"bg-orange-50 text-orange-700 border border-orange-200 shadow-sm", dot:"bg-orange-500", bar:"bg-orange-500", hex:"#f97316" }
+};
+
 
 function cx(){ return Array.from(arguments).filter(Boolean).join(' '); }
-function esc(s){ return (s||'').replace(/"/g,'&quot;'); }
+function esc(s) { 
+  if (!s) return ''; 
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;'); 
+}
 
 const DIVISIONS = [ "Direktorat SDMPP", "SDM", "Diklat", "Direktorat PKLO", "Keuangan", "GA", "IT", "Operasional & Marketing", "Direktorat Yanmed", "Keperawatan", "Medis", "Penunjang Medis" ];
 
 const REGISTER_JOBS = [
   { jabatan: "Master Admin", divisi: "Administrasi", role: "admin" },
   { jabatan: "Sekretaris Direksi", divisi: "Sekretariat Direksi", role: "admin" },
-
-  { jabatan: "Direktur Utama", divisi: "Direktur Utama", role: "user" },
+  { jabatan: "Sekretaris Direktur Sumber Daya Manusia, Pendidikan, dan Penelitian", divisi: "Sekretariat Direktorat SDMPP", role: "admin", scopeDirektorat: "Direktorat SDMPP" },
+  { jabatan: "Sekretaris Direktur Perencanaan Keuangan dan Layanan Operasional", divisi: "Sekretariat Direktorat PKLO", role: "admin", scopeDirektorat: "Direktorat PKLO" },
+  { jabatan: "Sekretaris Direktur Pelayanan Medik", divisi: "Sekretariat Direktorat Yanmed", role: "admin", scopeDirektorat: "Direktorat Yanmed" },
+  
+    { jabatan: "Plh.Direktur Utama", divisi: "Direktur Utama", role: "admin" },
   { jabatan: "Direktur SDM, Pendidikan, dan Penelitian", divisi: "Direktorat SDMPP", role: "user" },
   { jabatan: "Direktur Keuangan, Perencanaan, dan Layanan Operasional", divisi: "Direktorat PKLO", role: "user" },
   { jabatan: "Direktur Pelayanan Medik", divisi: "Direktorat Yanmed", role: "user" },
@@ -377,13 +752,6 @@ window.tasks = window.tasks || [];
 window.schedules = window.schedules || [];
 window.USERS = window.USERS || []; // Tambahkan baris ini
 
-const TASK_STATUS_STYLE = {
-  "On Progress": { chip:"bg-slate-100 text-slate-600", dot:"bg-slate-400", bar:"bg-slate-400", hex:"#94a3b8" },
-  "Due Soon": { chip:"bg-amber-50 text-amber-700", dot:"bg-amber-400", bar:"bg-amber-400", hex:"#fbbf24" },
-  "Overdue": { chip:"bg-rose-50 text-rose-600", dot:"bg-rose-400", bar:"bg-rose-400", hex:"#fb7185" },
-  "Completed Late": { chip:"bg-pink-50 text-pink-700", dot:"bg-pink-500", bar:"bg-pink-500", hex:"#ec4899" }, // Status Baru
-  "Done": { chip:"bg-evergreen-light/50 text-evergreen-dark", dot:"bg-evergreen", bar:"bg-evergreen", hex:"#A3E635" },
-};
 const SCHEDULE_STATUS_STYLE = {
   Scheduled:"bg-slate-100 text-slate-600",
   Live:"bg-blue-100 text-blue-700 font-bold border border-blue-200 animate-pulse shadow-sm", // <--- TAMBAHAN STATUS LIVE
@@ -472,6 +840,7 @@ function getDivisionStats(taskList){
 
 window.submitEditTask = async function(e, id) {
   e.preventDefault();
+    if (isLiteAdmin()) { alert('Akses ditolak: urusan tugas hanya dapat dilakukan Sekretaris Direktur Utama.'); return false; }
   const t = tasks.find(x => x.id === id);
   if (t) {
     t.name = document.getElementById('et-nama').value.trim();
@@ -518,6 +887,58 @@ activeTab: localStorage.getItem('gaspol_activeTab') || 'home',
 
 // Expose state ke window (Harus berada di luar kurung kurawal state)
 window.state = state;
+// Sekretaris Direktorat = admin dengan scopeDirektorat
+// Direktur Utama diperlakukan sebagai admin penuh (walau di database masih tersimpan role "user")
+window.normalizeUser = function(u) {
+  if (u && u.jabatan === 'Plh.Direktur Utama') u.role = 'admin';
+  return u;
+};
+window.isLiteAdmin = function() {
+  const cu = window.state && window.state.currentUser;
+  return !!(cu && cu.role === 'admin' && cu.scopeDirektorat);
+};
+// Daftar divisi yang boleh dilihat (null = tanpa batas)
+window.getScopeDivisi = function() {
+  const cu = window.state && window.state.currentUser;
+  if (!cu || cu.role !== 'admin' || !cu.scopeDirektorat) return null;
+  return [cu.scopeDirektorat, ...(HIERARCHY[cu.scopeDirektorat] || [])];
+};
+// Saring tugas & agenda sesuai scope
+window.applyScopeFilter = function() {
+  const sc = window.getScopeDivisi();
+  const f = list => sc ? list.filter(x => (x.divisi || []).some(d => sc.includes(d))) : list;
+  window.tasks = f(window._rawTasks || []);
+  window.schedules = f(window._rawSchedules || []);
+};
+
+/* ===== HAK AKSES AGENDA (berbasis pembuat) ===== */
+window.isFullAdmin = function() {
+  const cu = window.state && window.state.currentUser;
+  return !!(cu && cu.role === 'admin' && !cu.scopeDirektorat);
+};
+window.getScheduleCreator = function(s) {
+  return (window.USERS || []).find(u => u.id === s.createdBy) || null;
+};
+// Agenda Direksi = dibuat Sekretaris Direksi / Master Admin / agenda lama tanpa createdBy
+window.isDirutAgenda = function(s) {
+  const c = window.getScheduleCreator(s);
+  return !c || !c.scopeDirektorat;
+};
+window.isScheduleOwner = function(s) {
+  const cu = window.state && window.state.currentUser;
+  if (!cu || cu.role !== 'admin' || !s) return false;
+    if (cu.jabatan === 'Master Admin' || cu.jabatan === 'Plh.Direktur Utama') return true;   // akses penuh
+  if (s.createdBy) return s.createdBy === cu.id;
+  return cu.jabatan === 'Sekretaris Direksi';               // agenda lama
+};
+// Notulensi: pembuat agenda, ATAU semua admin (termasuk Sekretaris Direktorat) jika agendanya dibuat Sekretaris Direktur Utama
+window.canEditNotulensi = s => window.isScheduleOwner(s) ||
+  (window.isDirutAgenda(s) && !!window.state.currentUser && window.state.currentUser.role === 'admin');
+// Penanda per dokumen dinonaktifkan (diganti label per paragraf). Dibiarkan agar kode lain tidak error.
+window.notulensiByText = () => '';
+window.canEditAbsensi    = s => window.isScheduleOwner(s);
+window.canEditDokumentasi = s => !!(window.state.currentUser && window.state.currentUser.role === 'admin');
+
 
 function icon(name, cls){ return `<i data-lucide="${name}" class="${cls||''}"></i>`; }
 function refreshIcons(){ if(window.lucide) lucide.createIcons(); }
@@ -663,7 +1084,163 @@ window.handleUserCheck = function(cb) {
    MODAL SYSTEM
    ========================================================================= */
 function openModal(type, payload){ state.modal = { type, payload }; renderModal(); }
-window.closeModal = function(){ state.modal = null; state.notulensiMenuId = null; renderModal(); };
+window.closeModal = function(){ if (window.stopLiveNotulensi) window.stopLiveNotulensi(); state.modal = null; state.notulensiMenuId = null; renderModal(); };
+
+window._liveUnsubs = [];
+window.stopLiveNotulensi = function() {
+  (window._liveUnsubs || []).forEach(fn => { try { fn(); } catch (e) {} });
+  window._liveUnsubs = [];
+  window.triggerTyping = null;
+};
+
+/* ===== LABEL PENULIS PER PARAGRAF ===== */
+window._newBid = () => 'b' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+
+window.prepareNotulensiEditor = function(editor) {
+  try { document.execCommand('defaultParagraphSeparator', false, 'div'); } catch (e) {}
+  let cur = null;
+  Array.from(editor.childNodes).forEach(n => {
+    if (n.nodeType === 1 && n.tagName === 'DIV') {
+      cur = null;
+      if (!n.dataset.bid) n.dataset.bid = 'legacy-' + Math.random().toString(36).slice(2, 8);
+      return;
+    }
+    if (n.nodeType === 3 && !n.textContent.trim() && !cur) { editor.removeChild(n); return; }
+    if (!cur) {
+      cur = document.createElement('div');
+      cur.dataset.bid = 'legacy-' + Math.random().toString(36).slice(2, 8);
+      editor.insertBefore(cur, n);
+    }
+    cur.appendChild(n);
+  });
+  if (!editor.firstChild) editor.innerHTML = '<div><br></div>';
+};
+
+window.stampNotulensiAuthor = function() {
+  const editor = document.getElementById('notulensi-editor');
+  const cu = state.currentUser;
+  if (!editor || !cu) return;
+  const sel = window.getSelection();
+
+  const loose = Array.from(editor.childNodes).some(n =>
+    (n.nodeType === 3 && n.textContent.trim()) || (n.nodeType === 1 && n.tagName !== 'DIV'));
+  if (loose) {
+    const aN = sel.anchorNode, aO = sel.anchorOffset;
+    prepareNotulensiEditor(editor);
+    if (aN && editor.contains(aN)) {
+      const r = document.createRange(); r.setStart(aN, aO); r.collapse(true);
+      sel.removeAllRanges(); sel.addRange(r);
+    }
+  }
+
+  let node = sel.anchorNode;
+  if (node && editor.contains(node)) {
+    while (node && node.parentNode !== editor) node = node.parentNode;
+    if (node && node.nodeType === 1) {
+      const bid = node.dataset.bid;
+      const duplicated = bid && Array.from(editor.children).some(b => b !== node && b.dataset.bid === bid);
+      if (!bid || duplicated) { node.dataset.bid = _newBid(); node.dataset.by = cu.name; }
+    }
+  }
+  Array.from(editor.children).forEach(b => {
+    if (!b.dataset.bid) { b.dataset.bid = _newBid(); b.dataset.by = cu.name; }
+  });
+};
+
+// Jika mengetik di blok milik orang lain, pindahkan kursor ke blok baru atas nama sendiri
+window.guardForeignBlock = function(e) {
+  if (!e.inputType || !e.inputType.startsWith('insert')) return;
+  const editor = document.getElementById('notulensi-editor');
+  const cu = state.currentUser;
+  if (!editor || !cu) return;
+  const sel = window.getSelection();
+  if (!sel.rangeCount) return;
+  let node = sel.anchorNode;
+  if (!node || node === editor || !editor.contains(node)) return;
+  while (node.parentNode !== editor) node = node.parentNode;
+  if (node.nodeType !== 1) return;
+  const by = node.dataset.by;
+  if (!by || by === cu.name) return;          // blok sendiri atau blok lama tanpa label: biarkan
+  const nb = document.createElement('div');
+  nb.dataset.bid = _newBid();
+  nb.dataset.by = cu.name;
+  nb.innerHTML = '<br>';
+  node.insertAdjacentElement('afterend', nb);
+  const r = document.createRange();
+  r.setStart(nb, 0); r.collapse(true);
+  sel.removeAllRanges(); sel.addRange(r);
+};
+
+window.initLiveNotulensi = function(scheduleId) {
+  window.stopLiveNotulensi();
+  const editor = document.getElementById('notulensi-editor');
+  if (!editor) return;
+  prepareNotulensiEditor(editor);
+
+  const typingInd = document.getElementById('live-typing-indicator');
+  const cu = state.currentUser;
+  const base = 'gaspol_live/' + scheduleId;
+  const htmlRef = window.ref(window.rtdb, base + '/html');
+  const typingRef = window.ref(window.rtdb, base + '/typing');
+
+  let isEditing = false, hideTimer = null, pushTimer = null, lastTyping = 0;
+  editor.addEventListener('focus', () => isEditing = true);
+  editor.addEventListener('blur', () => isEditing = false);
+
+  const unsubHtml = window.onValue(htmlRef, snap => {
+    const serverHTML = snap.val();
+    if (serverHTML === null) return;
+    if (serverHTML !== editor.innerHTML && !isEditing) {
+      editor.innerHTML = serverHTML;
+      prepareNotulensiEditor(editor);
+    }
+  });
+  const unsubTyping = window.onValue(typingRef, snap => {
+    const d = snap.val();
+    if (!typingInd) return;
+    clearTimeout(hideTimer);
+    if (d && d.uid !== cu.id && Date.now() - d.time < 3000) {
+      typingInd.innerHTML = `${icon('edit-3', 'w-3 h-3 inline-block mr-1')} ${esc(d.name)} sedang mengetik...`;
+      refreshIcons();
+      hideTimer = setTimeout(() => { typingInd.innerHTML = ''; }, 3000);
+    } else { typingInd.innerHTML = ''; }
+  });
+
+  window.triggerTyping = function() {
+    const now = Date.now();
+    if (now - lastTyping > 1500) { lastTyping = now; window.set(typingRef, { uid: cu.id, name: cu.name, time: now }); }
+    clearTimeout(pushTimer);
+    pushTimer = setTimeout(() => window.set(htmlRef, editor.innerHTML), 300);
+  };
+
+  window._liveUnsubs.push(unsubHtml, unsubTyping, () => { clearTimeout(pushTimer); clearTimeout(hideTimer); });
+};
+
+// Pecah nama lengkap menjadi gelar depan, nama, dan gelar belakang
+window.parseName = function(full) {
+  const parts = (full || '').split(',').map(x => x.trim()).filter(Boolean);
+  const main = parts.shift() || '';
+  const toks = main.split(/\s+/).filter(Boolean);
+  const front = [];
+  while (toks.length > 1 && /^[A-Za-z]{1,5}\.$/.test(toks[0])) front.push(toks.shift());
+  return { front: front.join(' '), name: toks.join(' '), back: parts.join(', ') };
+};
+
+// Gabungkan kembali dengan rapi: tanpa koma nyasar dan tanpa gelar ganda
+window.buildName = function(front, name, back) {
+  const p = window.parseName(name);            // jaga-jaga jika gelar ikut terketik di kolom nama
+  const f = (front || p.front || '').trim();
+  const seen = new Set(), backs = [];
+  (String(back || '') + ',' + p.back).split(',').forEach(x => {
+    const t = x.trim();
+    const k = t.toLowerCase().replace(/[\s.]/g, '');
+    if (t && !seen.has(k)) { seen.add(k); backs.push(t); }
+  });
+  let out = p.name;
+  if (f) out = f + ' ' + out;
+  if (backs.length) out += ', ' + backs.join(', ');
+  return out.replace(/\s+/g, ' ').trim();
+};
 
 window.submitEditProfile = async function(e) {
   e.preventDefault();
@@ -672,50 +1249,195 @@ window.submitEditProfile = async function(e) {
   btn.innerHTML = 'Menyimpan...';
   btn.disabled = true;
 
+  const gelarDepan = document.getElementById('ep-gelar-depan').value.trim();
+  const namaTengah = document.getElementById('ep-nama').value.trim();
+  const gelarBelakang = document.getElementById('ep-gelar-belakang').value.trim();
+
+  const combinedName = buildName(gelarDepan, namaTengah, gelarBelakang);
+
   const oldPass = document.getElementById('ep-old-password').value;
   const newEmail = document.getElementById('ep-email').value.trim();
   const newPass = document.getElementById('ep-new-password').value;
+  const codename = (document.getElementById('ep-codename') || {}).value ? document.getElementById('ep-codename').value.trim() : '';
 
   try {
     const user = window.auth.currentUser;
     if (!user) throw new Error("Tidak ada sesi user aktif.");
 
-    // Autentikasi ulang (wajib dari Firebase untuk edit kredensial sensitif)
-    const credential = window.EmailAuthProvider.credential(user.email, oldPass);
-    await window.reauthenticateWithCredential(user, credential);
+    const emailChanged = newEmail !== user.email;
+    const passChanged = !!newPass;
 
-    let updatePromises = [];
-    let emailChanged = false;
+    // Autentikasi ulang hanya bila dibutuhkan
+    const reauth = async () => {
+      if (!oldPass) { const err = new Error('need-old-password'); err.code = 'app/need-old-password'; throw err; }
+      const credential = window.EmailAuthProvider.credential(user.email, oldPass);
+      await window.reauthenticateWithCredential(user, credential);
+    };
 
-    if (newEmail !== user.email) {
-      updatePromises.push(window.updateEmail(user, newEmail));
-      emailChanged = true;
+    if (passChanged) await reauth();
+
+    if (emailChanged) {
+      try {
+        await window.updateEmail(user, newEmail);
+      } catch (err) {
+        if (err.code === 'auth/requires-recent-login') {
+          await reauth();
+          await window.updateEmail(user, newEmail);
+        } else throw err;
+      }
     }
-    if (newPass) {
-      updatePromises.push(window.updatePassword(user, newPass));
-    }
+    if (passChanged) await window.updatePassword(user, newPass);
 
-    if (updatePromises.length > 0) await Promise.all(updatePromises);
-
-    // Update data di Realtime Database jika email berubah
     if (emailChanged) {
       state.currentUser.email = newEmail;
       await window.set(window.ref(window.rtdb, "gaspol_users/" + state.currentUser.id + "/email"), newEmail);
     }
-
-    alert("Profil akun berhasil diperbarui!");
+    if (combinedName !== state.currentUser.name) {
+      state.currentUser.name = combinedName;
+      await window.set(window.ref(window.rtdb, "gaspol_users/" + state.currentUser.id + "/name"), combinedName);
+    }
+    if (codename !== (state.currentUser.codename || '')) {
+      state.currentUser.codename = codename;
+      await window.set(window.ref(window.rtdb, "gaspol_users/" + state.currentUser.id + "/codename"), codename);
+    }
+    alert("Profil akun & gelar berhasil diperbarui!");
     closeModal();
-    document.getElementById('topbar').innerHTML = renderTopBar(); // Refresh UI
+    document.getElementById('topbar').innerHTML = renderTopBar();
   } catch (error) {
     console.error(error);
-    if (error.code === 'auth/invalid-credential') alert("Gagal: Password Lama yang Anda masukkan salah!");
+    if (error.code === 'app/need-old-password') alert("Untuk mengganti password (atau jika diminta demi keamanan saat ganti email), isi kolom Password Lama.");
+    else if (error.code === 'auth/invalid-credential' || error.code === 'auth/wrong-password') alert("Gagal: Password Lama yang Anda masukkan salah!");
     else if (error.code === 'auth/email-already-in-use') alert("Gagal: Email baru tersebut sudah digunakan.");
+    else if (error.code === 'auth/operation-not-allowed') alert("Firebase menolak ganti email langsung (fitur Email Enumeration Protection aktif di proyek Firebase Anda). Nama dan gelar tetap bisa diganti tanpa mengubah email.");
     else alert("Gagal memperbarui profil: " + error.message);
   } finally {
     btn.innerHTML = originalText;
     btn.disabled = false;
   }
   return false;
+};
+
+/* ===== TANDA TANGAN (TTD) ===== */
+// Perkecil + hapus latar putih, hasil tetap PNG transparan
+window.compressSignature = function(file, maxSize = 2400) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const img = new Image();
+      img.onload = () => {
+        const k = Math.min(1, maxSize / Math.max(img.width, img.height));
+        const w = Math.round(img.width * k), h = Math.round(img.height * k);
+        const c = document.createElement('canvas'); c.width = w; c.height = h;
+        const ctx = c.getContext('2d', { willReadFrequently: true });
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, 0, 0, w, h);
+        try {
+          const id = ctx.getImageData(0, 0, w, h), d = id.data;
+          const hist = new Uint32Array(256); let total = 0;
+          for (let i = 0; i < d.length; i += 4) {
+            if (d[i + 3] < 40) continue;
+            hist[Math.round(0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2])]++; total++;
+          }
+          const pct = p => { let acc = 0; for (let v = 0; v < 256; v++) { acc += hist[v]; if (acc >= total * p) return v; } return 255; };
+          const hi = pct(0.6);
+          let lo = pct(0.005);
+          if (hi - lo < 30) lo = Math.max(0, hi - 30);
+
+          let minX = w, minY = h, maxX = 0, maxY = 0;
+          for (let i = 0; i < d.length; i += 4) {
+            const lum = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+            let t = (hi - lum) / (hi - lo);
+            t = Math.max(0, Math.min(1, (t - 0.12) / 0.5));
+            t = t * t * (3 - 2 * t);
+            const a = Math.round(Math.min(d[i + 3], t * 255));
+            d[i] = 15; d[i + 1] = 20; d[i + 2] = 60; d[i + 3] = a;
+            if (a > 120) {
+              const idx = i / 4, x = idx % w, y = (idx / w) | 0;
+              if (x < minX) minX = x; if (x > maxX) maxX = x;
+              if (y < minY) minY = y; if (y > maxY) maxY = y;
+            }
+          }
+          ctx.putImageData(id, 0, 0);
+
+          // Pangkas ke area tanda tangan
+          let cut = c;
+          if (maxX > minX && maxY > minY) {
+            const pad = Math.round(Math.max(maxX - minX, maxY - minY) * 0.03);
+            const sx = Math.max(0, minX - pad), sy = Math.max(0, minY - pad);
+            const sw = Math.min(w, maxX + pad) - sx, sh = Math.min(h, maxY + pad) - sy;
+            cut = document.createElement('canvas'); cut.width = sw; cut.height = sh;
+            cut.getContext('2d').drawImage(c, sx, sy, sw, sh, 0, 0, sw, sh);
+          }
+
+          // Perbesar halus (minimal lebar 1800 px) agar tidak pecah saat dicetak
+          const up = Math.min(6, Math.max(1, 1800 / cut.width));
+          const big = document.createElement('canvas');
+          big.width = Math.round(cut.width * up); big.height = Math.round(cut.height * up);
+          const bctx = big.getContext('2d', { willReadFrequently: true });
+          bctx.imageSmoothingEnabled = true; bctx.imageSmoothingQuality = 'high';
+          bctx.drawImage(cut, 0, 0, big.width, big.height);
+
+          // Pertajam tepi setelah diperbesar
+          const bd = bctx.getImageData(0, 0, big.width, big.height), p = bd.data;
+          for (let i = 3; i < p.length; i += 4) {
+            let t = (p[i] / 255 - 0.25) / 0.5;
+            t = Math.max(0, Math.min(1, t));
+            p[i] = Math.round(t * t * (3 - 2 * t) * 255);
+          }
+          bctx.putImageData(bd, 0, 0);
+
+          big.toBlob(b => b ? resolve(new File([b], 'ttd.png', { type: 'image/png' })) : reject(new Error('Gagal memproses gambar')), 'image/png');
+        } catch (err) { reject(err); }
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+};
+
+window.refreshTtdPreview = function() {
+  const img = document.getElementById('ep-ttd-preview'), empty = document.getElementById('ep-ttd-empty');
+  if (!img || !empty) return;
+  const u = state.currentUser.ttd;
+  if (u) { img.src = u; img.classList.remove('hidden'); empty.classList.add('hidden'); }
+  else { img.removeAttribute('src'); img.classList.add('hidden'); empty.classList.remove('hidden'); }
+};
+
+window.uploadMySignature = async function(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  if (!file.type.startsWith('image/')) { input.value = ''; return alert('File harus berupa gambar.'); }
+  alert('Memproses dan mengunggah tanda tangan...');
+  try {
+    const f = await window.compressSignature(file);
+    const fd = new FormData();
+    fd.append('file', f);
+    fd.append('upload_preset', window.CLOUDINARY_PRESET);
+    const res = await fetch(window.CLOUDINARY_URL, { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!data.secure_url) throw new Error((data.error && data.error.message) || 'Upload gagal');
+    await window.set(window.ref(window.rtdb, 'gaspol_users/' + state.currentUser.id + '/ttd'), data.secure_url);
+    state.currentUser.ttd = data.secure_url;
+    refreshTtdPreview();
+    alert('Tanda tangan berhasil disimpan!');
+  } catch (err) {
+    console.error(err);
+    alert('Gagal mengunggah tanda tangan: ' + err.message);
+  }
+  input.value = '';
+};
+
+window.removeMySignature = async function() {
+  if (!state.currentUser.ttd) return;
+  if (!confirm('Hapus tanda tangan Anda?')) return;
+  try {
+    await window.remove(window.ref(window.rtdb, 'gaspol_users/' + state.currentUser.id + '/ttd'));
+    delete state.currentUser.ttd;
+    refreshTtdPreview();
+    alert('Tanda tangan dihapus.');
+  } catch (err) { console.error(err); alert('Gagal menghapus tanda tangan.'); }
 };
 
 function renderModal(){
@@ -727,17 +1449,60 @@ function renderModal(){
 
 if (type === 'editProfile') {
     title = 'Edit Profil Akun';
+    const pn = parseName(state.currentUser.name);
     body = `
       <form onsubmit="return submitEditProfile(event)">
         <div class="mb-4 p-3 bg-blue-50 border border-blue-100 rounded-xl text-xs text-blue-700 leading-relaxed shadow-sm">
-          <p>Untuk alasan keamanan, perubahan Email atau Password membutuhkan <b>Password Lama</b> Anda sebagai alat verifikasi.</p>
+         <p>Anda dapat memperbarui Nama, Gelar, Email, dan Tanda Tangan tanpa password. <b>Password Lama hanya diisi jika ingin mengganti password.</b></p>
         </div>
-        <label class="block mb-4"><span class="block text-sm font-medium text-gray-600 mb-1.5">Email Baru (Opsional jika tidak diganti)</span>
+        
+        <!-- BARIS INPUT NAMA & GELAR -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
+          <label class="block md:col-span-1">
+            <span class="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">Gelar Depan</span>
+            <input id="ep-gelar-depan" type="text" class="field-input text-sm" value="${esc(pn.front)}" placeholder="Opsional (dr., Prof.)" />
+          </label>
+          <label class="block md:col-span-2">
+            <span class="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">Nama Lengkap</span>
+            <!-- Menampilkan nama yang sudah ada di database sebagai default -->
+            <input id="ep-nama" type="text" class="field-input text-sm" value="${esc(pn.name)}" required />
+          </label>
+          <label class="block md:col-span-1">
+            <span class="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">Gelar Belakang</span>
+            <input id="ep-gelar-belakang" type="text" class="field-input text-sm" value="${esc(pn.back)}" placeholder="Opsional (S.Kom, dsb)" />
+          </label>
+        </div>
+        
+        <p class="text-[10px] text-gray-400 mb-5 italic">*Jika nama Anda sebelumnya sudah mengandung gelar, silakan hapus gelar tersebut dari kolom Nama Lengkap dan pindahkan ke kolom gelar yang sesuai.</p>
+        <label class="block mb-4"><span class="block text-sm font-medium text-gray-600 mb-1.5">Codename <span class="text-gray-400 font-normal">(dipakai di rekap peserta &amp; PIC)</span></span>
+          <input id="ep-codename" type="text" class="field-input text-sm" value="${esc(state.currentUser.codename || '')}" placeholder="Contoh: SS (Sammy Santoso)" maxlength="40" /></label>
+        <hr class="border-gray-100 my-5" />
+
+                <!-- BARIS KREDENSIAL -->
+        <label class="block mb-4"><span class="block text-sm font-medium text-gray-600 mb-1.5">Email</span>
           <input id="ep-email" type="email" class="field-input text-sm" value="${state.currentUser.email}" required /></label>
-        <label class="block mb-4"><span class="block text-sm font-medium text-gray-600 mb-1.5">Password Lama (Wajib Diisi)</span>
-          <input id="ep-old-password" type="password" class="field-input text-sm" placeholder="Masukkan password akun Anda saat ini..." required /></label>
+
+        <!-- TANDA TANGAN -->
+        <div class="mb-4 p-4 bg-gray-50 border border-gray-200 rounded-xl">
+          <span class="block text-sm font-medium text-gray-600 mb-2">Tanda Tangan (dipakai otomatis di Umand &amp; Absensi)</span>
+          <div class="flex items-center gap-4">
+            <div class="w-40 h-20 bg-white border border-dashed border-gray-300 rounded-lg flex items-center justify-center overflow-hidden shrink-0">
+              <img id="ep-ttd-preview" src="${state.currentUser.ttd || ''}" class="max-w-full max-h-full object-contain ${state.currentUser.ttd ? '' : 'hidden'}" />
+              <span id="ep-ttd-empty" class="text-[10px] text-gray-400 ${state.currentUser.ttd ? 'hidden' : ''}">Belum ada TTD</span>
+            </div>
+            <div class="flex flex-col gap-2 items-start">
+              <label class="btn-ghost cursor-pointer text-xs">Unggah TTD<input type="file" accept="image/*" class="hidden" onchange="uploadMySignature(this)" /></label>
+              <button type="button" onclick="removeMySignature()" class="text-xs text-rose-500 hover:underline">Hapus TTD</button>
+            </div>
+          </div>
+          <p class="text-[10px] text-gray-400 mt-2">Latar putih pada foto dihapus otomatis. TTD tersimpan langsung saat diunggah, tanpa perlu password.</p>
+        </div>
+
+        <label class="block mb-4"><span class="block text-sm font-medium text-gray-600 mb-1.5">Password Lama <span class="text-gray-400 font-normal">(hanya jika ganti password)</span></span>
+          <input id="ep-old-password" type="password" class="field-input text-sm" placeholder="Kosongkan jika tidak ganti password" autocomplete="current-password" /></label>
         <label class="block mb-6"><span class="block text-sm font-medium text-gray-600 mb-1.5">Password Baru (Opsional)</span>
-          <input id="ep-new-password" type="password" class="field-input text-sm" placeholder="Kosongkan jika tidak ingin ganti password" minlength="6" /></label>
+          <input id="ep-new-password" type="password" class="field-input text-sm" placeholder="Kosongkan jika tidak ingin ganti password" minlength="6" autocomplete="new-password" /></label>
+        
         <div class="flex justify-end gap-3 pt-4 border-t border-gray-100">
           <button type="button" class="btn-ghost" onclick="closeModal()">Batal</button>
           <button type="submit" id="btn-submit-ep" class="px-5 py-2.5 rounded-xl bg-blue-500 text-white font-bold hover:bg-blue-600 transition-all shadow-md flex items-center gap-2">${icon('save', 'w-4 h-4')} Simpan Perubahan</button>
@@ -747,37 +1512,206 @@ if (type === 'editProfile') {
   }
 
 
-if(type === 'absensi') {
+if (type === 'absensi') {
     const s = payload;
     title = 'Absensi Meeting: ' + s.nama;
-    if(!s.hadir) s.hadir = [];
+    if (!s.hadir) s.hadir = [];
+    window.tempAbsensi = [...s.hadir]; // Simpan di draft sementara sebelum disubmit
 
     body = `
-      <form onsubmit="return submitAbsensi(event, '${s.id}')">
-        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
-          <p class="text-sm text-gray-500 bg-emerald-50 p-3 rounded-xl border border-emerald-100 flex-1 m-0">Centang nama peserta yang <b>hadir</b>.</p>
-          <label class="flex items-center gap-2 cursor-pointer bg-gray-100 px-4 py-2.5 rounded-xl hover:bg-gray-200 transition-all border border-gray-200 whitespace-nowrap">
-            <input type="checkbox" onchange="toggleAllAbsensi(this)" class="w-4 h-4 text-emerald-600 rounded border-gray-300">
-            <span class="text-xs font-bold text-gray-700">Pilih Semua</span>
-          </label>
+      <div class="flex flex-col h-full space-y-4 mt-2">
+        <!-- Input Search & Add Custom -->
+        <div class="relative">
+          <label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">Cari / Tambah Peserta Hadir</label>
+          <input type="text" id="absensi-search" placeholder="Ketik nama terdaftar atau nama tamu luar..." class="field-input w-full" onkeyup="searchAbsensi(event, '${s.id}')" autocomplete="off" />
+          <div id="absensi-search-results" class="absolute z-10 w-full bg-white border border-gray-200 rounded-xl shadow-lg mt-1 hidden max-h-48 overflow-y-auto"></div>
         </div>
-        <div class="max-h-60 overflow-y-auto space-y-2 mb-4 pr-1">
-          ${s.users.length === 0 ? '<p class="text-sm text-gray-400 italic text-center py-4">Tidak ada peserta terdaftar di agenda ini.</p>' : [...s.users].sort((a, b) => a.localeCompare(b)).map(u => {
-            const isChecked = s.hadir.includes(u);
-            return `
-              <label class="flex items-center gap-3 p-3 border border-gray-200 rounded-xl cursor-pointer hover:bg-gray-50 transition-all ${isChecked ? 'bg-emerald-50/30 border-emerald-300' : ''}">
-                <input type="checkbox" value="${u}" class="w-4 h-4 absensi-cb text-emerald-600 rounded border-gray-300" ${isChecked ? 'checked' : ''} />
-                <span class="text-sm font-bold text-gray-800">${u}</span>
-              </label>
-            `;
-          }).join('')}
+
+        <!-- Wadah List Absensi -->
+        <div class="flex-1 min-h-[250px] border border-gray-100 bg-gray-50 rounded-xl p-4">
+          <h4 class="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-3">Daftar Hadir Saat Ini</h4>
+          <div id="absensi-list" class="flex flex-wrap gap-2">
+             <!-- Dirender melalui JavaScript -->
+          </div>
         </div>
+
         <div class="flex justify-end gap-3 pt-4 border-t border-gray-100">
-          <button type="button" class="btn-ghost" onclick="closeModal()">Batal</button>
-          <button type="submit" class="px-5 py-2.5 rounded-xl bg-evergreen text-gray-900 font-bold hover:bg-evergreen-hover transition-all shadow-md">Simpan Absensi</button>
+          <button class="btn-ghost" onclick="closeModal()">Batal</button>
+          <button onclick="saveAbsensiBaru('${s.id}')" class="px-5 py-2.5 rounded-xl bg-evergreen text-gray-900 font-bold hover:bg-evergreen-hover transition-all shadow-md">Simpan Absensi</button>
         </div>
-      </form>
+      </div>
     `;
+    setTimeout(() => { window.renderAbsensiList(); }, 50);
+  }
+
+if (type === 'scheduleWorkspace') {
+    const s = payload.schedule;
+    const activeTab = payload.activeTab || 'notulensi';
+        const isAdmin = state.currentUser.role === 'admin';
+    const canNotulensi = canEditNotulensi(s);
+    const canAbsensi   = canEditAbsensi(s);
+    const canDok       = canEditDokumentasi(s);
+    const canSave      = canNotulensi || canAbsensi || canDok;
+    title = 'Workspace Agenda: ' + s.nama;
+    fullScreen = true;
+
+    // Inisialisasi draft lokal selama workspace terbuka
+    window.tempAbsensi = [...(s.hadir || [])];
+    window.tempDokumentasi = [...(s.dokumentasi || [])];
+        if (canNotulensi && (!state.tempTasks || (state.tempTasks.length === 0 && !state.activeTempTaskId))) {
+      state.tempTasks = [];
+    }
+
+    // 1. KIRI: SIDEBAR MENU (Dipersempit menjadi w-48 / w-56)
+    const sidebarHtml = `
+      <div class="w-full md:w-48 lg:w-56 shrink-0 border-b md:border-b-0 md:border-r border-gray-200 pb-4 md:pb-0 pr-0 md:pr-4 flex flex-row md:flex-col gap-2 overflow-x-auto md:overflow-y-auto">
+         <button id="ws-btn-notulensi" onclick="switchWorkspaceTab('notulensi')" class="shrink-0 md:shrink w-auto md:w-full flex items-center p-3 rounded-xl transition-all ${activeTab === 'notulensi' ? 'bg-blue-50 border-blue-200 border text-blue-700 shadow-sm' : 'bg-transparent border border-transparent text-gray-600 hover:bg-gray-50'}">
+            <div class="ws-icon-bg p-2 rounded-lg mr-3 ${activeTab === 'notulensi' ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-500'}">${icon('file-text', 'w-4 h-4')}</div>
+            <div class="text-left leading-tight hidden md:block"><p class="text-sm font-bold">Notulensi</p><p class="text-[10px] opacity-80">Catat pembahasan rapat</p></div>
+            <div class="text-sm font-bold md:hidden mr-2">Notulensi</div>
+         </button>
+         
+         ${canAbsensi ? `
+         <button id="ws-btn-absensi" onclick="switchWorkspaceTab('absensi')" class="shrink-0 md:shrink w-auto md:w-full flex items-center p-3 rounded-xl transition-all ${activeTab === 'absensi' ? 'bg-emerald-50 border-emerald-200 border text-emerald-700 shadow-sm' : 'bg-transparent border border-transparent text-gray-600 hover:bg-gray-50'}">
+            <div class="ws-icon-bg p-2 rounded-lg mr-3 ${activeTab === 'absensi' ? 'bg-emerald-500 text-white' : 'bg-gray-100 text-gray-500'}">${icon('users', 'w-4 h-4')}</div>
+            <div class="text-left leading-tight hidden md:block"><p class="text-sm font-bold">Absensi</p><p class="text-[10px] opacity-80">Live Search peserta</p></div>
+            <div class="text-sm font-bold md:hidden mr-2">Absensi</div>
+         </button>` : ''}
+         
+         <button id="ws-btn-dokumentasi" onclick="switchWorkspaceTab('dokumentasi')" class="shrink-0 md:shrink w-auto md:w-full flex items-center p-3 rounded-xl transition-all ${activeTab === 'dokumentasi' ? 'bg-purple-50 border-purple-200 border text-purple-700 shadow-sm' : 'bg-transparent border border-transparent text-gray-600 hover:bg-gray-50'}">
+            <div class="ws-icon-bg p-2 rounded-lg mr-3 ${activeTab === 'dokumentasi' ? 'bg-purple-500 text-white' : 'bg-gray-100 text-gray-500'}">${icon('camera', 'w-4 h-4')}</div>
+            <div class="text-left leading-tight hidden md:block"><p class="text-sm font-bold">Dokumentasi</p><p class="text-[10px] opacity-80">Upload foto kegiatan</p></div>
+            <div class="text-sm font-bold md:hidden mr-2">Dokumentasi</div>
+         </button>
+      </div>
+    `;
+
+    // 2. KANAN: KONTEN UTAMA (Render semua tab, kontrol via CSS)
+    
+    // TAB NOTULENSI
+    let notulensiHtml = '';
+    const draftKey = 'gaspol_draft_' + s.id;
+    const savedDraft = localStorage.getItem(draftKey);
+    const initialText = savedDraft !== null ? savedDraft : (s.notulensi || '');
+    
+     if (canNotulensi) {
+      // Ganti blok notulensiHtml untuk Admin menjadi:
+notulensiHtml = `
+  <div class="h-full flex flex-col w-full min-h-[400px]">
+     <!-- UBAH DI SINI: Gunakan grid-cols-12 -->
+     <div class="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 overflow-y-auto lg:overflow-hidden">
+        
+        <!-- EDITOR CATATAN (Lebar 7 Kolom) -->
+        <div class="col-span-1 lg:col-span-7 flex flex-col relative lg:border-r border-gray-200 lg:pr-6 overflow-hidden min-h-[320px]">
+           <label class="flex justify-between items-center text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 shrink-0">
+              <span>Catatan Rapat</span>
+              <div class="flex gap-2 items-center">
+                 <!-- INDIKATOR LIVE MENGETIK -->
+                 <span id="live-typing-indicator" class="text-[10px] text-blue-500 italic font-bold normal-case"></span>
+                 ${savedDraft !== null ? `<span class="text-amber-500 text-[10px] bg-amber-50 px-2 py-0.5 rounded">*Draft dipulihkan</span>` : ''}
+              </div>
+           </label>
+                      <div id="notulensi-editor" contenteditable="true" 
+              onbeforeinput="guardForeignBlock(event)"
+              oninput="stampNotulensiAuthor(); saveNotulensiDraft('${draftKey}'); if(typeof triggerTyping === 'function') triggerTyping('${s.id}')"
+              onmouseup="checkTextSelection()" 
+              class="flex-1 field-input overflow-y-auto text-sm leading-relaxed outline-none p-4 focus:ring-2 focus:ring-blue-300 transition-all bg-white whitespace-pre-wrap" 
+              placeholder="Tulis hasil pembahasan rapat di sini...">${initialText}</div>
+              <p id="notulensi-by-line" class="shrink-0 mt-2 text-[10px] italic text-gray-400">${esc(notulensiByText(s))}</p>
+           <div id="floating-task-btn" onclick="createTaskFromSelection()" class="absolute hidden z-50 bg-gray-900 text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-lg cursor-pointer hover:bg-black hover:scale-105 transition-all items-center gap-2 anim-popin">
+              ${icon('plus-circle', 'w-4 h-4 text-evergreen')} Jadikan Tugas
+           </div>
+        </div>
+        
+        <!-- PANEL KANAN DETAIL TUGAS (Lebar 5 Kolom) -->
+        <div id="notulensi-right-panel" class="col-span-1 lg:col-span-5 flex flex-col overflow-y-auto pr-2 pb-4"></div>
+     
+     </div>
+  </div>
+`;
+    } else {
+      let processedHtml = s.notulensi ? DOMPurify.sanitize(s.notulensi) : '';
+      if (processedHtml) {
+          const tempDiv = document.createElement('div');
+          tempDiv.innerHTML = processedHtml;
+          const spans = tempDiv.querySelectorAll('span[data-temp-id]');
+          spans.forEach(span => {
+              const realTask = tasks.find(t => t.name === span.getAttribute('data-original-text') && t.scheduleRefId === s.id);
+                if (realTask && (state.currentUser.role === 'admin' || realTask.divisi.includes(state.currentUser.divisi))) {
+                  span.setAttribute('onclick', `openTaskDetailById('${realTask.id}')`);
+                  span.classList.add('hover:ring-2', 'hover:ring-evergreen-dark', 'hover:scale-[1.01]', 'cursor-pointer');
+              } else {
+                  span.outerHTML = span.getAttribute('data-original-text');
+              }
+          });
+          processedHtml = tempDiv.innerHTML;
+      }
+      notulensiHtml = processedHtml
+       ? `<div class="h-full overflow-y-auto pr-3"><div class="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap bg-gray-50 p-6 rounded-2xl border border-gray-100">${processedHtml}</div>${notulensiByText(s) ? `<p class="mt-2 text-[10px] italic text-gray-400">${esc(notulensiByText(s))}</p>` : ''}</div>`
+          : `<div class="py-12 flex flex-col items-center text-gray-400">${icon('file-x', 'w-6 h-6 mb-3')}<p class="text-sm font-medium">Belum ada notulensi.</p></div>`;
+    }
+
+    // TAB ABSENSI
+    let absensiHtml = `
+      <div class="flex flex-col h-full w-full">
+        <div class="relative">
+          <label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">Cari / Tambah Peserta Hadir</label>
+          <input type="text" id="absensi-search" placeholder="Ketik nama terdaftar atau tamu luar lalu Enter..." class="field-input w-full" onkeyup="searchAbsensi(event, '${s.id}')" autocomplete="off" />
+          <div id="absensi-search-results" class="absolute z-10 w-full bg-white border border-gray-200 rounded-xl shadow-lg mt-1 hidden max-h-48 overflow-y-auto"></div>
+        </div>
+        <div class="flex-1 min-h-[250px] border border-gray-100 bg-gray-50 rounded-xl p-4 overflow-y-auto mt-4">
+          <h4 class="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-3">Daftar Hadir Draft</h4>
+          <div id="absensi-list" class="flex flex-wrap gap-2"></div>
+        </div>
+      </div>
+    `;
+
+    // TAB DOKUMENTASI
+    let dokumentasiHtml = `
+      <div class="flex flex-col h-full w-full">
+         <div class="flex justify-between items-center mb-4">
+           <p class="text-xs text-gray-500 uppercase tracking-wider font-bold">Foto Kegiatan (Maks. 2 Foto)</p>
+           <span id="ws-dok-counter" class="text-[10px] bg-purple-50 text-purple-700 px-2 py-1 rounded-md font-bold">${window.tempDokumentasi.length} / 2</span>
+         </div>
+         <div id="ws-dok-container" class="flex gap-4 flex-wrap flex-1 content-start"></div>
+      </div>
+    `;
+
+   body = `
+      <div class="flex flex-col h-full overflow-hidden w-full gap-4 md:gap-6 pt-2">
+         <!-- UBAH DI SINI: Tambahkan gap-6 md:gap-8 untuk memberi jarak tegas antara sidebar dan konten -->
+         <div class="flex flex-col md:flex-row flex-1 overflow-hidden gap-6 md:gap-8">
+           
+           ${sidebarHtml}
+           
+           <!-- UBAH DI SINI: Hapus pl-0 md:pl-2 dan ganti menjadi w-full h-full -->
+           <div class="flex-1 relative overflow-hidden w-full h-full">
+              <div id="ws-tab-notulensi" class="absolute inset-0 transition-opacity duration-300 ${activeTab === 'notulensi' ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}">${notulensiHtml}</div>
+              ${canAbsensi ? `<div id="ws-tab-absensi" class="absolute inset-0 transition-opacity duration-300 ${activeTab === 'absensi' ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}">${absensiHtml}</div>` : ''}
+              <div id="ws-tab-dokumentasi" class="absolute inset-0 transition-opacity duration-300 ${activeTab === 'dokumentasi' ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}">${dokumentasiHtml}</div>
+           </div>
+         
+         </div>
+         
+        ${canSave ? `
+         <div class="flex justify-end gap-3 mt-2 pt-4 border-t border-gray-100 shrink-0">
+            <button class="btn-ghost" onclick="closeModal()">Batal</button>
+            <button onclick="submitWorkspace('${s.id}')" class="px-6 py-2.5 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-700 transition-all shadow-md flex items-center gap-2">
+              ${icon('save', 'w-4 h-4')} Simpan Semua Perubahan
+            </button>
+         </div>` : ''}
+      </div>
+    `;
+
+    // Render inisial UI untuk data absensi, dokumentasi & form tugas kanan
+        setTimeout(() => { 
+      if (canAbsensi) window.renderAbsensiList();
+      window.renderWorkspaceDokumentasi(canDok, s.id);   // sekarang juga tampil (baca saja) untuk user biasa
+            if (canNotulensi) {
+        window.renderRightPanel();
+        window.initLiveNotulensi(s.id);                  // mengaktifkan live edit
+      }
+    }, 50);
   }
 
   if(type === 'statDetail') {
@@ -787,7 +1721,7 @@ if(type === 'absensi') {
     if(mode === 'done') { title = "Daftar Tugas Selesai"; filteredTasks = tasks.filter(t=>t.done); }
     if(mode === 'progress') { title = "Daftar Tugas Belum Selesai (On Progress)"; filteredTasks = tasks.filter(t=>!t.done && daysDiff(t.deadline) >= 0); }
     if(mode === 'overdue') { title = "Daftar Tugas Lewat Deadline"; filteredTasks = tasks.filter(t=> !t.done && daysDiff(t.deadline) < 0); }
-if(mode === 'pendingExt') { title = "Menunggu Persetujuan Ekstensi"; filteredTasks = tasks.filter(t=> t.extensions && t.extensions.some(ex => ex.status === 'pending')); }
+    if(mode === 'pendingExt') { title = "Menunggu Persetujuan Ekstensi"; filteredTasks = tasks.filter(t=> t.extensions && t.extensions.some(ex => ex.status === 'pending')); }
     
     body = `
       <div class="max-h-[60vh] overflow-y-auto pr-2 space-y-2">
@@ -819,7 +1753,7 @@ if(mode === 'pendingExt') { title = "Menunggu Persetujuan Ekstensi"; filteredTas
 
     body = `
       <div class="space-y-6">
-        <div class="grid grid-cols-4 gap-3">
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
           <div class="bg-slate-50 p-4 rounded-xl border border-slate-200 text-center">
             <p class="text-[10px] text-slate-500 font-bold uppercase">Total Tugas</p>
             <p class="text-xl font-extrabold text-slate-800 mt-1">${d.total}</p>
@@ -858,7 +1792,7 @@ if(mode === 'pendingExt') { title = "Menunggu Persetujuan Ekstensi"; filteredTas
     title = `Detail Skor Akhir: ${d.divisi}`;
     body = `
       <div class="space-y-6">
-        <div class="grid grid-cols-4 gap-3">
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
           <div class="bg-slate-50 p-4 rounded-xl border border-slate-200 text-center">
             <p class="text-[10px] text-slate-500 font-bold uppercase">Total Tugas</p>
             <p class="text-xl font-extrabold text-slate-800 mt-1">${d.total}</p>
@@ -975,6 +1909,16 @@ if(mode === 'pendingExt') { title = "Menunggu Persetujuan Ekstensi"; filteredTas
         ` : ''}
 
         <!-- WADAH DESKRIPSI DENGAN TOMBOL VIEW NOTULENSI -->
+        ${t.reviewStatus === 'revised' && !t.done ? `
+          <div class="bg-orange-50 border border-orange-200 p-4 rounded-xl flex items-start gap-3 shadow-sm mb-4">
+            ${icon('alert-circle', 'w-5 h-5 text-orange-600 mt-0.5 shrink-0')}
+            <div>
+              <h4 class="font-bold text-orange-800 text-xs uppercase tracking-wider mb-1">Tugas Dikembalikan (Revisi)</h4>
+              <p class="text-sm text-orange-700"><b>Catatan Admin:</b> ${t.revisionNote}</p>
+            </div>
+          </div>
+        ` : ''}
+
         <div class="p-4 bg-gray-50 rounded-xl border border-gray-200 text-gray-700">
           ${descContent}
         </div>
@@ -1039,52 +1983,69 @@ if(mode === 'pendingExt') { title = "Menunggu Persetujuan Ekstensi"; filteredTas
           </div>
         ` : ''}
 
+
+        ${(state.currentUser.role === 'admin' && t.done && t.reviewStatus === 'waiting' && !isLiteAdmin()) ? `
+          <div class="bg-blue-50 border border-blue-200 p-4 rounded-xl mt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
+            <div>
+              <h4 class="font-bold text-blue-800 text-xs uppercase tracking-wider">Menunggu Review Admin</h4>
+              <p class="text-xs text-blue-600 mt-0.5">User telah menyelesaikan tugas ini dan siap di-review.</p>
+            </div>
+            <button onclick='openModal("reviewTask", tasks.find(x=>x.id==="${t.id}"))' class="px-5 py-2.5 rounded-xl bg-blue-600 text-white font-bold text-xs hover:bg-blue-700 shadow-md whitespace-nowrap flex items-center gap-2">${icon('check-circle', 'w-4 h-4')} Review Pekerjaan</button>
+          </div>
+        ` : ''}
+
 <!-- KODE BARU TIMELINE & EXTENSION DIMULAI DI SINI -->
         ${t.timeline && t.timeline.length > 0 ? `
           <div class="mt-6 bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
             <h4 class="font-bold text-gray-800 text-xs uppercase tracking-wider mb-4 flex items-center gap-2">${icon('history','w-4 h-4 text-gray-500')} Riwayat & Timeline Tugas</h4>
             <div class="space-y-4 pl-3 border-l-2 border-gray-100 ml-2">
-              ${t.timeline.map(tl => {
-                let dotColor = 'bg-slate-400'; 
-                let titleColor = 'text-gray-800';
-                let boxBg = 'bg-gray-50';
-                let boxBorder = 'border-gray-100';
+              ${(t.timeline || []).map((log, index, tl) => {
+  let titleLower = (log.title || '').toLowerCase();
+  let dotColor = 'bg-slate-400';
+  let titleColor = 'text-slate-800';
+  let boxBg = 'bg-white';
+  let boxBorder = 'border-slate-200';
 
-                // Cek kata kunci pada judul riwayat untuk menentukan warna
-                const titleLower = tl.title.toLowerCase();
-                
-                if (titleLower.includes('pengajuan')) {
-                  dotColor = 'bg-orange-500';
-                  titleColor = 'text-orange-600';
-                  boxBg = 'bg-orange-50';
-                  boxBorder = 'border-orange-100';
-                } else if (titleLower.includes('ditolak')) {
-                  dotColor = 'bg-rose-500';
-                  titleColor = 'text-rose-600';
-                  boxBg = 'bg-rose-50';
-                  boxBorder = 'border-rose-100';
-                } else if (titleLower.includes('disetujui')) {
-                  dotColor = 'bg-evergreen-dark';
-                  titleColor = 'text-evergreen-dark';
-                  boxBg = 'bg-evergreen-light/30';
-                  boxBorder = 'border-evergreen-light';
-                } else {
-                  // Default untuk "Update Progres" atau "Tugas Dibuat"
-                  dotColor = 'bg-evergreen-dark'; 
-                  titleColor = 'text-gray-800';
-                  boxBg = 'bg-gray-50';
-                  boxBorder = 'border-gray-100';
-                }
+  if (titleLower.includes('selesai') || titleLower.includes('disetujui')) {
+    dotColor = 'bg-emerald-500';
+    titleColor = 'text-emerald-700';
+    boxBg = 'bg-emerald-50';
+    boxBorder = 'border-emerald-200';
+  } else if (titleLower.includes('ditolak')) {
+    dotColor = 'bg-rose-500';
+    titleColor = 'text-rose-700';
+    boxBg = 'bg-rose-50';
+    boxBorder = 'border-rose-200';
+  } else if (titleLower.includes('revisi')) {
+    dotColor = 'bg-orange-500';
+    titleColor = 'text-orange-700';
+    boxBg = 'bg-orange-50';
+    boxBorder = 'border-orange-200';
+  } else if (titleLower.includes('disubmit')) {
+    dotColor = 'bg-blue-500';
+    titleColor = 'text-blue-700';
+    boxBg = 'bg-blue-50';
+    boxBorder = 'border-blue-200';
+  }
 
-                return `
-                <div class="relative pl-4">
-                  <div class="absolute w-3 h-3 ${dotColor} rounded-full -left-[23px] top-1 border-[3px] border-white shadow-sm transition-colors"></div>
-                  <p class="text-xs font-bold ${titleColor}">${tl.title}</p>
-                  <p class="text-[10px] text-gray-400 font-medium mb-1">${fmtDate(tl.date)} • ${tl.time} WIB</p>
-                  ${tl.desc ? `<p class="text-xs text-gray-700 ${boxBg} p-2 rounded-lg border ${boxBorder} transition-colors">${tl.desc}</p>` : ''}
-                </div>
-                `;
-              }).join('')}
+  /// Pisahkan bagian yang bertingkat agar aman dari error backtick
+  let lineHtml = (index !== tl.length - 1) ? '<div class="absolute left-[7px] top-7 bottom-0 w-[2px] bg-slate-100"></div>' : '';
+  let descHtml = log.desc ? `<p class="text-xs text-slate-600 mt-2 leading-relaxed">${log.desc}</p>` : '';
+  let dateStr = log.date ? fmtDate(log.date) : '-';
+  let timeStr = log.time || '-';
+
+  return `
+    <div class="relative flex gap-4 ${index === tl.length - 1 ? '' : 'pb-6'}">
+      ${lineHtml}
+      <div class="relative z-10 w-[16px] h-[16px] rounded-full border-4 border-white ${dotColor} mt-1 shrink-0 shadow-sm"></div>
+      <div class="flex-1 bg-white border ${boxBorder} ${boxBg} p-4 rounded-xl shadow-sm">
+        <h4 class="font-bold text-sm ${titleColor}">${log.title || 'Tugas Dibuat'}</h4>
+        <p class="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-wider">${dateStr} • ${timeStr} WIB</p>
+        ${descHtml}
+      </div>
+    </div>
+  `;
+}).join('')}
             </div>
           </div>
         ` : ''}
@@ -1113,7 +2074,7 @@ if(mode === 'pendingExt') { title = "Menunggu Persetujuan Ekstensi"; filteredTas
               return `<div class="bg-rose-50 p-3 rounded-xl border border-rose-200 mt-4 text-xs text-rose-700 font-medium">Batas maksimal pengajuan perpanjangan deadline (3x) telah habis.</div>`;
             }
           }
-          else if (state.currentUser.role === 'admin' && !t.done && pendingExt) {
+          else if (state.currentUser.role === 'admin' && !t.done && pendingExt && !isLiteAdmin()) {
             return `
               <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 mt-4 shadow-sm">
                 <h4 class="font-bold text-amber-800 text-xs mb-3 flex items-center gap-1">${icon('alert-triangle','w-4 h-4')} Tindakan Dibutuhkan: Pengajuan Perpanjangan Ke-${extCount}</h4>
@@ -1133,7 +2094,7 @@ if(mode === 'pendingExt') { title = "Menunggu Persetujuan Ekstensi"; filteredTas
         })()}
         <!-- KODE BARU TIMELINE & EXTENSION BERAKHIR DI SINI -->
 
-        ${(state.currentUser.role==='admin' && !t.done) ? `
+        ${(state.currentUser.role==='admin' && !t.done && !isLiteAdmin()) ? `
           <div class="flex items-center justify-end gap-3 pt-4 mt-2 border-t border-gray-100">
             <button onclick="markTaskDone('${t.id}')" class="px-4 py-2 rounded-xl text-xs font-bold text-gray-500 bg-gray-100 hover:bg-gray-200 transition-all">Force Close</button>
             <button onclick='openModal("editTask", tasks.find(x=>x.id==="${t.id}"))' class="px-4 py-2 rounded-xl text-xs font-bold text-white bg-blue-500 hover:bg-blue-600 shadow-md transition-all flex items-center gap-1.5">${icon('edit-3', 'w-3.5 h-3.5')} Edit Tugas</button>
@@ -1142,7 +2103,44 @@ if(mode === 'pendingExt') { title = "Menunggu Persetujuan Ekstensi"; filteredTas
       </div>`;
  
  }
+if(type === 'reviewTask') {
+    const t = payload;
+    title = 'Review Tugas'; wide = true;
+    body = `
+      <div class="space-y-4 text-sm">
+        <div class="p-4 bg-gray-50 rounded-xl border border-gray-200 text-gray-700">
+          <p class="text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Hasil Pekerjaan User:</p>
+          <p class="text-sm font-medium whitespace-pre-wrap">${t.progressDetail}</p>
+          ${t.proofLink ? `<a href="${t.proofLink}" target="_blank" class="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-blue-200 rounded-lg text-blue-600 font-bold text-xs hover:bg-blue-50 transition-all shadow-sm">${icon('external-link', 'w-3.5 h-3.5')} Buka Bukti Kerja</a>` : ''}
+        </div>
 
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+          <!-- TERIMA TUGAS -->
+          <div class="border border-emerald-200 bg-emerald-50 p-5 rounded-2xl flex flex-col justify-between">
+            <div>
+              <h4 class="font-bold text-emerald-800 mb-2 flex items-center gap-2">${icon('check-circle', 'w-5 h-5')} Terima Tugas</h4>
+              <p class="text-xs text-emerald-700 mb-4">Tugas sudah sesuai dan dianggap selesai sepenuhnya tanpa perlu ada perbaikan.</p>
+            </div>
+            <button onclick="approveTask('${t.id}')" class="w-full py-2.5 bg-emerald-500 text-white font-bold rounded-xl hover:bg-emerald-600 transition-all shadow-md mt-auto">Setujui & Selesaikan</button>
+          </div>
+
+          <!-- BERIKAN REVISI -->
+          <div class="border border-orange-200 bg-orange-50 p-5 rounded-2xl">
+            <h4 class="font-bold text-orange-800 mb-2 flex items-center gap-2">${icon('edit-3', 'w-5 h-5')} Berikan Revisi</h4>
+            <p class="text-xs text-orange-700 mb-4">Tugas belum sesuai standar, kembalikan ke user untuk diperbaiki.</p>
+            <form onsubmit="return submitRevision(event, '${t.id}')" class="space-y-3">
+              <textarea id="rev-note" class="field-input text-xs min-h-[60px] resize-none" placeholder="Tuliskan catatan detail revisi..." required></textarea>
+              <div>
+                <label class="block text-[10px] font-bold text-orange-800 uppercase mb-1">Berikan Deadline Baru (Opsional)</label>
+                <input type="date" id="rev-deadline" class="field-input text-xs" value="${t.deadline}" />
+              </div>
+              <button type="submit" class="w-full py-2.5 bg-orange-500 text-white font-bold rounded-xl hover:bg-orange-600 transition-all shadow-md">Kirim Revisi ke User</button>
+            </form>
+          </div>
+        </div>
+      </div>
+    `;
+  }
   if(type === 'editTask') {
     const t = payload;
     title = 'Edit Tugas'; wide = true;
@@ -1180,7 +2178,7 @@ if(mode === 'pendingExt') { title = "Menunggu Persetujuan Ekstensi"; filteredTas
   if(type === 'scheduleDetail'){
     const s = payload;
     title = s.nama;
-    const isAdmin = state.currentUser.role === 'admin';
+        const isAdmin = isScheduleOwner(s);   // tombol Edit/Reschedule/Hold/Batalkan hanya untuk pembuat
 
     let actionButtons = '';
     if (isAdmin) {
@@ -1205,6 +2203,7 @@ if(mode === 'pendingExt') { title = "Menunggu Persetujuan Ekstensi"; filteredTas
       <div class="space-y-3 text-sm">
         <div class="flex items-center gap-2 text-gray-600">${icon('calendar-clock','w-4 h-4 text-evergreen-dark')} ${fmtDate(s.tanggal)} • ${s.waktu}</div>
         <div class="flex items-center gap-2 text-gray-600">${icon('map-pin','w-4 h-4 text-evergreen-dark')} ${s.lokasi || '-'}</div>
+       <div class="flex items-center gap-2 text-gray-500 text-xs">${icon('user-check','w-4 h-4 text-evergreen-dark')} Dibuat oleh: <b class="text-gray-700">${esc(s.createdByName || (getScheduleCreator(s) || {}).name || 'Sekretaris Direksi')}</b></div>
         ${s.refLink ? `<div class="flex items-center gap-2 text-blue-600">${icon('link','w-4 h-4')} <a href="${s.refLink}" target="_blank" class="hover:underline font-bold">Buka Link Referensi / Materi</a></div>` : ''}
         
         <div><p class="text-xs text-gray-400 mb-1.5 flex items-center gap-1">${icon('building-2','w-3.5 h-3.5')} Divisi Terlibat</p>
@@ -1271,6 +2270,37 @@ if(mode === 'pendingExt') { title = "Menunggu Persetujuan Ekstensi"; filteredTas
     `;
   }
 
+if (type === 'alert') {
+    title = payload.title || 'Informasi';
+    body = `
+      <div class="flex flex-col items-center text-center p-4">
+        <div class="w-16 h-16 bg-blue-100 text-blue-500 rounded-full flex items-center justify-center mb-4 shadow-sm">
+          ${icon('info', 'w-8 h-8')}
+        </div>
+        <p class="text-sm text-gray-600 mb-6 font-medium">${payload.msg}</p>
+        <button onclick="closeModal()" class="w-full px-5 py-2.5 rounded-xl bg-gray-900 text-white font-bold hover:bg-black transition-all shadow-md">Mengerti & Tutup</button>
+      </div>
+    `;
+  }
+
+  if (type === 'confirmRestore') {
+    title = 'Konfirmasi Timpa Data';
+    body = `
+      <div class="flex flex-col items-center text-center p-4">
+        <div class="w-16 h-16 bg-rose-100 text-rose-500 rounded-full flex items-center justify-center mb-4 shadow-sm">
+          ${icon('alert-triangle', 'w-8 h-8')}
+        </div>
+        <p class="text-sm text-gray-700 font-bold mb-2">Yakin ingin memulihkan data dari file backup?</p>
+        <p class="text-xs text-rose-500 mb-6 font-medium bg-rose-50 p-3 rounded-lg border border-rose-100">Peringatan: Seluruh data (Agenda, Task, User) saat ini di sistem akan DITIMPA secara permanen dengan data dari file ini!</p>
+        <div class="flex gap-3 w-full">
+          <button onclick="closeModal()" class="btn-ghost flex-1 justify-center py-2.5">Batal</button>
+          <button onclick="executeRestore()" class="px-5 py-2.5 rounded-xl bg-rose-500 text-white font-bold hover:bg-rose-600 transition-all shadow-md flex-1 flex justify-center items-center gap-2">${icon('upload-cloud', 'w-4 h-4')} Ya, Timpa Data</button>
+        </div>
+      </div>
+    `;
+    window.tempRestoreData = payload; 
+  }
+
   if(type === 'notulensi'){
     const { schedule, mode } = payload;
     title = 'Notulensi & Tindak Lanjut — ' + schedule.nama;
@@ -1287,7 +2317,7 @@ if(mode === 'pendingExt') { title = "Menunggu Persetujuan Ekstensi"; filteredTas
       body = `
         <div class="h-full flex flex-col">
           <div class="flex-1 grid grid-cols-1 lg:grid-cols-2 gap-6 overflow-hidden min-h-[400px]">
-            <div class="flex flex-col relative border-r border-gray-200 pr-6 overflow-hidden">
+            <div class="flex flex-col relative lg:border-r border-gray-200 lg:pr-6 overflow-hidden min-h-[320px]">
               <label class="flex justify-between items-center text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 shrink-0">
                 <span>Catatan Rapat</span>
                 ${savedDraft !== null ? `<span class="text-amber-500 text-[10px] bg-amber-50 px-2 py-0.5 rounded">*Draft dipulihkan</span>` : ''}
@@ -1311,7 +2341,7 @@ if(mode === 'pendingExt') { title = "Menunggu Persetujuan Ekstensi"; filteredTas
         setTimeout(() => renderRightPanel(), 50);
     } else {
       // Tampilan View Saja
-      let processedHtml = schedule.notulensi || '';
+      let processedHtml = schedule.notulensi ? DOMPurify.sanitize(schedule.notulensi) : '';
       
       if (processedHtml) {
         // Gunakan elemen div sementara untuk membedah HTML notulensi
@@ -1387,13 +2417,14 @@ if(mode === 'pendingExt') { title = "Menunggu Persetujuan Ekstensi"; filteredTas
         </div>
 
         <div class="block mb-5">
-          <div class="flex items-center justify-between mb-2">
+                    <div class="flex items-center justify-between mb-2">
             <span class="block text-sm font-medium text-gray-600">Divisi Terlibat</span>
             <label class="flex items-center gap-2 cursor-pointer hover:text-evergreen-dark transition-colors bg-gray-50 px-2 py-1 rounded border border-gray-200">
               <input type="checkbox" id="cb-select-all" onchange="toggleAllDivisi(this)" class="w-4 h-4 text-evergreen-dark rounded border-gray-300 focus:ring-evergreen" />
               <span class="text-xs font-bold text-gray-700">Pilih Semua</span>
             </label>
           </div>
+          ${isLiteAdmin() ? `<span class="block text-[10px] text-amber-600 mb-2">*Wajib memilih minimal satu divisi di bawah ${state.currentUser.scopeDirektorat}.</span>` : ''}
           <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
             ${DIVISIONS.map(d => `
               <label class="flex items-center gap-2 p-2.5 border border-gray-200 bg-white rounded-lg cursor-pointer hover:border-evergreen hover:bg-evergreen-light/20 transition-all shadow-sm">
@@ -1527,20 +2558,30 @@ if(mode === 'pendingExt') { title = "Menunggu Persetujuan Ekstensi"; filteredTas
       </form>`;
   }
 
-  const modalClass = fullScreen 
-    ? 'w-[98vw] h-[96vh] max-w-none rounded-[2rem]' 
-    : (wide ? 'max-w-2xl' : 'max-w-md') + ' w-full rounded-3xl';
+ const isSidebar = type === 'detailSidebar';
+  const modalClass = isSidebar 
+    ? 'w-full max-w-sm h-full rounded-l-3xl rounded-r-none m-0 shadow-[-10px_0_40px_rgba(0,0,0,0.1)] slide-left' 
+    : (fullScreen ? 'w-[98vw] h-[96vh] max-w-none rounded-[2rem]' : (wide ? 'max-w-2xl' : 'max-w-md') + ' w-full rounded-3xl max-h-[85vh] flex flex-col');
+
+  const wrapperClass = isSidebar 
+    ? 'fixed inset-0 z-50 flex justify-end bg-gray-900/50 backdrop-blur-sm' 
+    : 'fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-gray-900/50 backdrop-blur-sm anim-fade';
 
   root.innerHTML = `
-    <div class="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-gray-900/50 backdrop-blur-sm anim-fade" onclick="if(event.target===this) closeModal()">
-      <div class="bg-white shadow-2xl p-6 flex flex-col anim-popin ${modalClass}" onclick="event.stopPropagation()">
-        <div class="flex items-center justify-between mb-5 shrink-0">
-          <h3 class="${fullScreen ? 'text-xl' : 'text-lg'} font-bold text-gray-800">${title}</h3>
-          <button onclick="closeModal()" class="p-2 rounded-full text-gray-400 hover:bg-rose-50 hover:text-rose-500 transition-all">${icon('x','w-5 h-5')}</button>
+    <div class="${wrapperClass}" onclick="if(event.target===this) closeModal()">
+      <div class="bg-white shadow-2xl p-4 md:p-6 flex flex-col ${isSidebar ? '' : 'anim-popin'} overflow-hidden ${modalClass}" onclick="event.stopPropagation()">
+        
+        <!-- HEADER -->
+        <div class="flex items-center justify-between mb-4 shrink-0 pb-3 border-b border-gray-100">
+          <h3 class="${fullScreen ? 'text-xl' : 'text-lg'} font-bold text-gray-800 truncate pr-4">${title}</h3>
+          <button onclick="closeModal()" class="p-2 rounded-full text-gray-400 hover:bg-rose-50 hover:text-rose-500 transition-all shrink-0">${icon('x','w-5 h-5')}</button>
         </div>
-        <div class="${fullScreen ? 'flex-1 overflow-hidden flex flex-col' : 'max-h-[88vh] overflow-y-auto p-1'}">
+
+        <!-- BODY -->
+        <div class="${fullScreen ? 'flex-1 overflow-hidden flex flex-col' : 'flex-1 overflow-y-auto pr-1 space-y-4'}">
           ${body}
         </div>
+
       </div>
     </div>`;
   refreshIcons();
@@ -1555,6 +2596,7 @@ window.openTaskDetailById = function(id) {
 };
 // --------------------------------------------------------
 window.markTaskDone = async function(id){ 
+  if (isLiteAdmin()) return alert('Akses ditolak: urusan tugas hanya dapat dilakukan Sekretaris Direktur Utama.');
   const t = tasks.find(x=>x.id===id); 
   if(t){ 
     t.done = true; 
@@ -1567,61 +2609,20 @@ window.markTaskDone = async function(id){
 window.updateScheduleStatus = async function(id, status){
   const s = schedules.find(x=>x.id===id); 
   if(s) { 
+    if (!isScheduleOwner(s)) return alert('Akses ditolak: hanya pembuat agenda yang dapat mengubah agenda ini.');
     s.status = status; 
     await window.set(window.ref(window.rtdb, "gaspol_schedules/" + id), s); 
   }
 };
-window.saveNotulensi = async function(scheduleId){
-  const s = schedules.find(x => x.id === scheduleId);
-  if (!s) return;
 
-  const editor = document.getElementById('notulensi-editor');
-  s.notulensi = editor ? editor.innerHTML : ''; 
-  s.status = 'Done';
-s.doneDate = toISO(today); 
-
-  let validTasksCount = 0;
-  if(state.tempTasks && state.tempTasks.length > 0) {
-    const taskPromises = [];
-    state.tempTasks.forEach((t, index) => {
-      if(t.name && t.divisi.length > 0 && t.pic.length > 0 && t.deadline) {
-        const newTask = {
-          id: 't' + Date.now() + index,
-          inputDate: toISO(today),
-          name: t.name, 
-          desc: `Tugas turunan dari hasil rapat: ${s.nama}`, 
-          scheduleRefId: scheduleId, 
-          deadline: t.deadline, 
-          deadlineTime: '23:59',
-          isArchived: false, 
-          taskLink: '', 
-          divisi: t.divisi, 
-          pic: t.pic,    
-          done: false, doneDate: null, proofLink: '', progressDetail: '', obstacle: '',
-          extensions: [],
-          timeline: [{ date: toISO(today), time: new Date().toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'}), title: 'Tugas Turunan Dibuat', desc: 'Dibuat berdasarkan catatan Notulensi rapat.' }]
-        };
-        taskPromises.push(window.set(window.ref(window.rtdb, "gaspol_tasks/" + newTask.id), newTask));
-        validTasksCount++;
-      }
-    });
-    await Promise.all(taskPromises);
-  }
-
-  await window.set(window.ref(window.rtdb, "gaspol_schedules/" + s.id), s);
-  localStorage.removeItem('gaspol_draft_' + scheduleId); 
-  state.tempTasks = [];
-  state.activeTempTaskId = null;
-  closeModal(); 
-  alert(validTasksCount > 0 ? `Notulensi disimpan & ${validTasksCount} Tugas Turunan didistribusikan!` : `Notulensi berhasil disimpan!`);
-};
 
 /* =========================================================================
    FUNGSI SUBMIT UNTUK ADD TASK & ADD SCHEDULE (ANTI-RELOAD/TERPENTAL)
    ========================================================================= */
 
 window.submitAddTask = async function(e) {
-  e.preventDefault(); // Mencegah browser melakukan refresh halaman
+  e.preventDefault();
+  if (isLiteAdmin()) return false; // Mencegah browser melakukan refresh halaman
   const nama = document.getElementById('at-nama').value.trim();
   const desk = document.getElementById('at-desk').value.trim();
   const deadline = document.getElementById('at-deadline').value;
@@ -1685,6 +2686,16 @@ const selectedDate = new Date(tanggal + 'T00:00:00');
     return false;
   }
 
+  // Sekretaris direktorat: wajib melibatkan minimal 1 divisi di bawah direktoratnya
+  if (isLiteAdmin()) {
+    const scope = getScopeDivisi(); // [nama direktorat, ...divisi bawahannya]
+    const terlibat = Array.from(state.addScheduleDivisi).some(d => scope.includes(d));
+    if (!terlibat) {
+      alert(`Agenda harus melibatkan minimal satu divisi di bawah ${state.currentUser.scopeDirektorat}.`);
+      return false;
+    }
+  }
+
   let waktu = waktuMulai;
   if (waktuSelesai) waktu += ' - ' + waktuSelesai;
   else waktu += ' - Selesai';
@@ -1714,7 +2725,9 @@ const selectedDate = new Date(tanggal + 'T00:00:00');
     status: 'Scheduled',
     notulensi: '',
     dokumentasi: [],
-    isArchived: false
+    isArchived: false,
+    createdBy: state.currentUser.id,
+    createdByName: state.currentUser.name
   };
 
   await window.set(window.ref(window.rtdb, "gaspol_schedules/" + newSchedule.id), newSchedule);
@@ -1722,26 +2735,6 @@ const selectedDate = new Date(tanggal + 'T00:00:00');
   return false;
 };
 
-window.submitEditSchedule = function(e, id) {
-  e.preventDefault();
-  const s = schedules.find(x => x.id === id);
-  if(s) {
-    s.nama = document.getElementById('es-nama').value.trim();
-    const remainingSpans = document.querySelectorAll('#es-current-users span[data-user]');
-    let updatedUsers = Array.from(remainingSpans).map(span => span.getAttribute('data-user'));
-    
-    const added = document.getElementById('es-users-add').value;
-    if(added.trim()) {
-      const newUsers = added.split(',').map(u => u.trim()).filter(u => u.length > 0);
-      updatedUsers = [...updatedUsers, ...newUsers];
-    }
-    s.users = updatedUsers;
-    saveData(); // Simpan ke Local Storage
-  }
-  closeModal(); 
-  renderTabContent();
-  return false;
-};
 
 /* =========================================================================
    FUNGSI LOGIKA CHECKBOX UNTUK ADD TASK & LAPORAN PROGRES
@@ -1903,6 +2896,7 @@ window.requestExtension = async function(id) {
 window.rejectExtension = async function(id) {
   const t = tasks.find(x => x.id === id);
   if(!t) return;
+    if (isLiteAdmin()) return alert('Akses ditolak: urusan tugas hanya dapat dilakukan Sekretaris Direktur Utama.');
 
   const pendingIndex = t.extensions.findIndex(ex => ex.status === 'pending');
   if(pendingIndex > -1) {
@@ -1917,7 +2911,34 @@ window.rejectExtension = async function(id) {
   openModal('taskDetail', t);
 };
 
+window.approveExtension = async function(id) {
+  if (isLiteAdmin()) return alert('Akses ditolak: urusan tugas hanya dapat dilakukan Sekretaris Direksi.');
+  const t = tasks.find(x => x.id === id);
+  if (!t) return;
+  const newDate = document.getElementById('ext-approve-date').value;
+  if (!newDate) return alert('Tanggal persetujuan wajib diisi!');
+  const ext = (t.extensions || []).find(ex => ex.status === 'pending');
+  if (!ext) return alert('Tidak ada pengajuan perpanjangan yang menunggu.');
+
+  const oldDeadline = t.deadline;
+  ext.status = 'approved';
+  ext.approvedDate = newDate;
+  t.deadline = newDate;
+
+  if (!t.timeline) t.timeline = [];
+  t.timeline.push({
+    date: toISO(today),
+    time: new Date().toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'}),
+    title: 'Perpanjangan Disetujui',
+    desc: `Deadline diubah dari ${fmtDate(oldDeadline)} menjadi ${fmtDate(newDate)}.`
+  });
+
+  await window.set(window.ref(window.rtdb, "gaspol_tasks/" + id), t);
+  alert('Perpanjangan deadline disetujui!');
+  openModal('taskDetail', t);
+};
 // Fungsi Final Submit (Tugas Selesai)
+
 window.submitTaskFinal = async function(id) {
   const t = tasks.find(x => x.id === id);
   if (!t) return;
@@ -1925,15 +2946,64 @@ window.submitTaskFinal = async function(id) {
   const link = document.getElementById('tp-link').value.trim();
   if (!detail || !link) return alert('Keterangan Progres dan Link Bukti Kerja wajib diisi!');
 
-  if (!confirm('Yakin tugas ini sudah selesai?')) return;
+  if (!confirm('Yakin tugas ini sudah selesai dan siap di-review Admin?')) return;
   t.progressDetail = detail;
   t.obstacle = document.getElementById('tp-kendala').value.trim();
   t.proofLink = link;
   t.done = true;
   t.doneDate = toISO(today);
+  t.reviewStatus = 'waiting';
+
+  if (!t.timeline) t.timeline = [];
+  t.timeline.push({ 
+    date: toISO(today), 
+    time: new Date().toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'}), 
+    title: 'Disubmit untuk Review', 
+    desc: 'Tugas telah diselesaikan oleh user dan menunggu persetujuan admin.' 
+  }); // <--- PASTIKAN KURUNG TUTUP INI LENGKAP
 
   await window.set(window.ref(window.rtdb, "gaspol_tasks/" + id), t);
   closeModal();
+};
+window.approveTask = async function(id) {
+  if (isLiteAdmin()) return alert('Akses ditolak: urusan tugas hanya dapat dilakukan Sekretaris Direktur Utama.');
+  const t = tasks.find(x => x.id === id);
+  if(!t) return;
+  if(!confirm('Setujui dan selesaikan tugas ini secara permanen?')) return;
+  t.reviewStatus = 'approved';
+  if(!t.timeline) t.timeline = [];
+  t.timeline.push({ date: toISO(today), time: new Date().toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'}), title: 'Tugas Disetujui', desc: 'Admin telah menerima dan menyetujui hasil pekerjaan.' });
+  
+  await window.set(window.ref(window.rtdb, "gaspol_tasks/" + id), t);
+  closeModal();
+};
+
+window.submitRevision = async function(e, id) {
+  e.preventDefault();
+  const t = tasks.find(x => x.id === id);
+  if(!t) return false;
+    if (isLiteAdmin()) { alert('Akses ditolak: urusan tugas hanya dapat dilakukan Sekretaris Direktur Utama.'); return false; }
+  
+  const note = document.getElementById('rev-note').value.trim();
+  const newDeadline = document.getElementById('rev-deadline').value;
+  
+  t.done = false;
+  t.reviewStatus = 'revised';
+  t.revisionNote = note;
+  
+  let descTimeline = `Catatan Revisi: ${note}`;
+  if (newDeadline && newDeadline !== t.deadline) {
+    t.deadline = newDeadline;
+    descTimeline += ` | Deadline diperpanjang ke: ${fmtDate(newDeadline)}`;
+  }
+
+  if(!t.timeline) t.timeline = [];
+  t.timeline.push({ date: toISO(today), time: new Date().toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'}), title: 'Revisi Diberikan', desc: descTimeline });
+
+  await window.set(window.ref(window.rtdb, "gaspol_tasks/" + id), t);
+  alert('Revisi berhasil dikirimkan kembali ke User!');
+  closeModal();
+  return false;
 };
 /* =========================================================================
    FUNGSI BARU: SUBMIT EDIT & RESCHEDULE
@@ -1941,6 +3011,7 @@ window.submitTaskFinal = async function(id) {
 window.submitReschedule = async function(e, id) {
   e.preventDefault();
   const s = schedules.find(x => x.id === id);
+    if (s && !isScheduleOwner(s)) { alert('Akses ditolak: hanya pembuat agenda yang dapat mengedit agenda ini.'); return false; }
   if(s) {
     s.tanggal = document.getElementById('rs-tanggal').value;
     s.waktu = document.getElementById('rs-waktu-mulai').value + ' - ' + document.getElementById('rs-waktu-selesai').value;
@@ -1954,6 +3025,7 @@ window.submitReschedule = async function(e, id) {
 window.submitEditSchedule = async function(e, id) {
   e.preventDefault();
   const s = schedules.find(x => x.id === id);
+    if (s && !isScheduleOwner(s)) { alert('Akses ditolak: hanya pembuat agenda yang dapat mereschedule.'); return false; }
   if(s) {
     s.nama = document.getElementById('es-nama').value.trim();
     const remainingSpans = document.querySelectorAll('#es-current-users span[data-user]');
@@ -1980,14 +3052,329 @@ window.toggleNotulensiMenu = function(id) {
 };
 
 // Fungsi Print Umand
-window.printUmand = function(id) {
-  const s = schedules.find(x => x.id === id);
+window.printUmand = async function(id) {
+    const s = schedules.find(x => x.id === id) || (window._archivedSchedCache || {})[id];
   if (!s) return;
-  
-  // Tampilkan Notifikasi Sementara
-  alert(`Fungsi Print Umand dijalankan untuk agenda: ${s.nama}.\n\nSistem akan mencetak Notulensi, Daftar Hadir, dan Dokumentasi sesuai dengan template cetak.`);
-  
-  // Nanti masukkan logika cetak (seperti window.print() atau jsPDF) di sini.
+  s.divisi = s.divisi || []; s.users = s.users || []; s.dokumentasi = s.dokumentasi || []; s.hadir = s.hadir || [];
+
+  // Buka tab dulu (sinkron dengan klik) agar tidak diblokir pop-up blocker
+  const win = window.open('', '_blank');
+  if (win) win.document.write('<p style="font-family:sans-serif;padding:24px;color:#555">Menyiapkan dokumen PDF…</p>');
+
+  try {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' }); // A4
+    doc.setLineHeightFactor(1.35);
+
+    const PW = 210, PH = 297, M = 20, CW = PW - M * 2, BOTTOM = PH - 20;
+
+    // ---------- Helper gambar ----------
+    const loadImg = (url, mime, maxPx) => new Promise(resolve => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        try {
+          let w = img.naturalWidth, h = img.naturalHeight;
+          const k = Math.min(1, maxPx / Math.max(w, h));
+          w = Math.round(w * k); h = Math.round(h * k);
+          const c = document.createElement('canvas'); c.width = w; c.height = h;
+          const ctx = c.getContext('2d');
+          if (mime === 'image/jpeg') { ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h); }
+          ctx.drawImage(img, 0, 0, w, h);
+          resolve({ data: c.toDataURL(mime, 0.85), w, h });
+        } catch (e) { resolve(null); }
+      };
+      img.onerror = () => resolve(null);
+      img.src = url;
+    });
+
+    const photoUrls = s.dokumentasi || [];
+    const [hdr, ...photos] = await Promise.all([
+      loadImg('Header_Uman.png', 'image/png', 2000),
+      ...photoUrls.map(u => loadImg(u, 'image/jpeg', 1600))
+    ]);
+
+    // ---------- Data ----------
+    const longDate = iso => new Date(iso + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    const tglRapat = longDate(s.tanggal);
+    const tglCetak = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+    const waktuStr = (s.waktu || '-') + ' WIB';
+    // Notula = pembuat agenda (agenda lama tanpa createdBy -> Sekretaris Direksi)
+let notula = USERS.find(u => u.id === s.createdBy);
+if (!notula || notula.jabatan === 'Master Admin' || notula.jabatan === 'Plh.Direktur Utama') {
+  notula = USERS.find(u => u.jabatan === 'Sekretaris Direksi') || state.currentUser;
+}
+const DIREKTUR_BY_SCOPE = {
+  'Direktorat SDMPP':  'Direktur SDM, Pendidikan, dan Penelitian',
+  'Direktorat PKLO':   'Direktur Keuangan, Perencanaan, dan Layanan Operasional',
+  'Direktorat Yanmed': 'Direktur Pelayanan Medik'
+};
+const direkturJabatan = notula.scopeDirektorat ? DIREKTUR_BY_SCOPE[notula.scopeDirektorat] : 'Direktur Utama';
+const direktur = USERS.find(u => u.jabatan === direkturJabatan) || {};
+const notulaName = notula.name || '';
+const notulaJabatan = notula.jabatan || 'Notula';
+const direkturName = direktur.name || '';
+    // Muat TTD notula, direktur, dan peserta hadir (PNG transparan)
+    const loadTtd = u => (u && u.ttd) ? loadImg(u.ttd, 'image/png', 2000) : Promise.resolve(null);
+    const [notulaTtd, direkturTtd] = await Promise.all([loadTtd(notula), loadTtd(direktur)]);
+    const hadirTtd = {};
+    await Promise.all((s.hadir || []).map(async n => {
+      hadirTtd[n] = await loadTtd(USERS.find(x => x.name === n));
+    }));
+    const jabatanOf = n => (USERS.find(u => u.name === n) || {}).jabatan || 'Peserta Luar / Tamu';
+
+    // Notulensi HTML -> teks polos (badge nomor tugas dibuang)
+    const notulensiText = (() => {
+      const d = document.createElement('div');
+      d.innerHTML = DOMPurify.sanitize(s.notulensi || '');
+      d.querySelectorAll('span[data-temp-id] > span.bg-evergreen-dark').forEach(n => n.remove());
+      const d2 = document.createElement('div');
+      d2.innerHTML = d.innerHTML.replace(/<br\s*\/?>/gi, '\n').replace(/<\/(div|p|li|h[1-6])>/gi, '\n').replace(/<li[^>]*>/gi, '• ');
+      return d2.textContent.replace(/\u00a0/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+    })();
+
+    // ---------- Header (diulang di setiap halaman) ----------
+    const HDR_M = 10;               // margin kiri-kanan khusus header (mm). Makin kecil = makin lebar
+const HW = PW - HDR_M * 2;      // 190 mm                                   // ubah jika header ingin lebih kecil
+    const HH = hdr ? HW * hdr.h / hdr.w : 24;
+    const HEADER_TOP = 8;
+    const contentTop = HEADER_TOP + HH + 8;
+    const headerDone = new Set();
+
+    const drawHeader = () => {
+      const pg = doc.internal.getCurrentPageInfo().pageNumber;
+      if (headerDone.has(pg)) return;
+      headerDone.add(pg);
+      if (hdr) {
+        doc.addImage(hdr.data, 'PNG', HDR_M, HEADER_TOP, HW, HH);
+      } else { // cadangan jika gambar gagal dimuat
+        doc.setFont('times', 'bold'); doc.setFontSize(13);
+        doc.text('KEMENTERIAN KESEHATAN', PW / 2, HEADER_TOP + 6, { align: 'center' });
+        doc.setFontSize(11); doc.text('DIREKTORAT JENDERAL KESEHATAN LANJUTAN', PW / 2, HEADER_TOP + 11, { align: 'center' });
+        doc.setFontSize(12); doc.text('RS SURABAYA', PW / 2, HEADER_TOP + 16.5, { align: 'center' });
+        doc.setFont('times', 'normal'); doc.setFontSize(8.5);
+        doc.text('Jalan Indrapura No. 17 Kel. Kemayoran Kec. Krembangan, Kota Surabaya 60179', PW / 2, HEADER_TOP + 21, { align: 'center' });
+      }
+    };
+
+    // ---------- Helper tulis ----------
+    let y = contentTop;
+    const setF = (style, size) => { doc.setFont('times', style); doc.setFontSize(size); };
+    const lh = () => doc.getFontSize() * 1.35 * 0.3528;
+    const newPage = () => { doc.addPage(); drawHeader(); y = contentTop; };
+    const ensure = h => { if (y + h > BOTTOM) newPage(); };
+
+    const title = t => {
+      setF('bold', 13);
+      doc.text(t, PW / 2, y, { align: 'center' });
+      const w = doc.getTextWidth(t);
+      doc.setDrawColor(0); doc.setLineWidth(0.4);
+      doc.line(PW / 2 - w / 2, y + 1.2, PW / 2 + w / 2, y + 1.2);
+      y += 10;
+    };
+    const info = (label, val) => {
+      setF('normal', 11.5);
+      const ls = doc.splitTextToSize(String(val || '-'), CW - 36);
+      ensure(ls.length * lh());
+      doc.text(label, M, y); doc.text(':', M + 32, y); doc.text(ls, M + 36, y);
+      y += ls.length * lh();
+    };
+    const para = t => {
+      setF('normal', 11.5);
+      const ls = doc.splitTextToSize(t, CW);
+      ensure(ls.length * lh());
+      doc.text(ls, M, y);
+      y += ls.length * lh() + 3;
+    };
+
+    // Justify manual: sebar spasi antar kata agar rata kiri-kanan
+    const justifyLine = (line, x, yy, width) => {
+      const words = line.trim().split(/\s+/);
+      if (words.length < 2) { doc.text(line, x, yy); return; }
+      const wordsW = words.reduce((a, w) => a + doc.getTextWidth(w), 0);
+      const gap = (width - wordsW) / (words.length - 1);
+      if (gap > doc.getTextWidth(' ') * 4) { doc.text(line, x, yy); return; } // cegah spasi terlalu renggang
+      let cx = x;
+      words.forEach(w => { doc.text(w, cx, yy); cx += doc.getTextWidth(w) + gap; });
+    };
+
+        const sigLines = (lines, maxW) => { setF('normal', 11.5); return lines.flatMap(l => doc.splitTextToSize(l, maxW)); };
+               const signature = (cx, lines, name, maxW = 70, reserve = 0, img = null) => {
+      const wrapped = sigLines(lines, maxW);
+      wrapped.forEach((l, i) => doc.text(l, cx, y + i * lh(), { align: 'center' }));
+      const ny = y + Math.max(wrapped.length, reserve) * lh() + 26;
+      if (img) {
+        let h = 26, w = h * img.w / img.h;
+        if (w > 60) { w = 60; h = w * img.h / img.w; }
+        const centerY = ny - 17;                       // tengah ruang antara jabatan dan nama
+        doc.addImage(img.data, 'PNG', cx - w / 2, centerY - h / 2, w, h);
+      }
+      setF('bold', 11.5);
+      if (name) {
+        doc.text(name, cx, ny, { align: 'center' });
+        const nw = doc.getTextWidth(name);
+        doc.setLineWidth(0.3); doc.line(cx - nw / 2, ny + 1, cx + nw / 2, ny + 1);
+      } else {
+        doc.text('(................................)', cx, ny, { align: 'center' });
+      }
+    };
+
+    // =====================================================
+    // HALAMAN 1: PEMBUKA
+    // =====================================================
+    drawHeader();
+    y = contentTop + 2;
+    setF('normal', 11.5);
+    doc.text('Surabaya, ' + tglCetak, PW - M, y, { align: 'right' });
+    y += 10;
+    info('Nomor', '........ / ........ / ........');
+    info('Lampiran', '1 (satu) berkas');
+    info('Hal', 'Laporan Hasil Rapat – ' + s.nama);
+    y += 5;
+    setF('normal', 11.5);
+    doc.text('Yth. Bapak/Ibu Peserta Rapat', M, y); y += lh();
+    doc.text('di Tempat', M, y); y += 10;
+
+    para('Dengan hormat,');
+    para('Bersama ini kami sampaikan hasil pelaksanaan rapat dengan rincian sebagai berikut:');
+    y += 1;
+    info('Agenda', s.nama);
+    info('Hari/Tanggal', tglRapat);
+    info('Waktu', waktuStr);
+    info('Tempat', s.lokasi || '-');
+    y += 5;
+    para('Adapun hasil pembahasan (notulensi), daftar hadir, serta dokumentasi kegiatan kami lampirkan pada halaman berikutnya sebagai bagian yang tidak terpisahkan dari surat ini.');
+    para('Demikian disampaikan. Atas perhatian dan kerja sama Bapak/Ibu, kami ucapkan terima kasih.');
+
+        ensure(65); y += 8;
+        signature(PW - M - 38, ['Notula,', notulaJabatan], notulaName, 72, 0, notulaTtd);
+
+    // =====================================================
+    // HALAMAN 2+: NOTULENSI
+    // =====================================================
+    newPage();
+    title('NOTULENSI RAPAT');
+    info('Agenda', s.nama);
+    info('Hari/Tanggal', tglRapat);
+    info('Waktu', waktuStr);
+    info('Tempat', s.lokasi || '-');
+    y += 4;
+    setF('bold', 11.5); doc.text('Hasil Pembahasan:', M, y); y += lh() + 1;
+
+    if (!notulensiText) {
+      setF('italic', 11.5); doc.text('Belum ada notulensi untuk agenda ini.', M, y); y += lh();
+        } else {
+      setF('normal', 11.5);
+      notulensiText.split('\n').forEach(p => {
+        if (!p.trim()) { y += lh() * 0.6; return; }
+        const lines = doc.splitTextToSize(p, CW);
+        lines.forEach((line, i) => {
+          ensure(lh());
+          setF('normal', 11.5);
+          if (i < lines.length - 1) justifyLine(line, M, y, CW);  // baris biasa: justify
+          else doc.text(line, M, y);                                // baris terakhir paragraf: rata kiri
+          y += lh();
+        });
+      });
+    }
+
+    const byTxt = notulensiByText(s);
+    if (byTxt) {
+      y += 2; setF('italic', 9); ensure(lh());
+      doc.setTextColor(110); doc.text(byTxt, M, y); doc.setTextColor(0);
+      y += lh();
+    }
+
+        ensure(65); y += 10;
+    const nLines = ['Notula,', notulaJabatan];
+    const dLines = ['Mengetahui,', direkturJabatan];
+    const rowN = Math.max(sigLines(nLines, 78).length, sigLines(dLines, 78).length);
+        signature(M + CW * 0.25, nLines, notulaName, 78, rowN, notulaTtd);
+    signature(M + CW * 0.75, dLines, direkturName, 78, rowN, direkturTtd);
+    y += 45;
+
+    // =====================================================
+    // HALAMAN: DAFTAR HADIR
+    // =====================================================
+    newPage();
+    title('DAFTAR HADIR');
+    info('Agenda', s.nama);
+    info('Hari/Tanggal', tglRapat);
+    info('Tempat', s.lokasi || '-');
+    y += 3;
+
+    const hadir = s.hadir || [];
+    if (hadir.length === 0) {
+      setF('italic', 11.5); doc.text('Belum ada data kehadiran.', M, y); y += lh();
+    } else {
+      doc.autoTable({
+        startY: y,
+        head: [['No', 'Nama', 'Jabatan', 'Tanda Tangan']],
+        body: hadir.map((n, i) => [i + 1, n, jabatanOf(n), '']),
+        theme: 'grid',
+        styles: { font: 'times', fontSize: 10.5, cellPadding: 2.5, minCellHeight: 9, valign: 'middle', lineColor: [80, 80, 80], lineWidth: 0.2, textColor: 20 },
+        headStyles: { fillColor: [230, 230, 230], textColor: 20, halign: 'center', fontStyle: 'bold' },
+        columnStyles: { 0: { cellWidth: 12, halign: 'center' }, 1: { cellWidth: 55 }, 3: { cellWidth: 40 } },
+        margin: { top: contentTop, left: M, right: M, bottom: 20 },
+        didDrawPage: () => drawHeader(),
+        didDrawCell: d => {
+          if (d.section === 'body' && d.column.index === 3) {
+            const p = hadirTtd[hadir[d.row.index]];
+            if (p) {
+              const pad = 1.5, maxW = d.cell.width - pad * 2, maxH = d.cell.height - pad * 2;
+              let h = maxH, w = h * p.w / p.h;
+              if (w > maxW) { w = maxW; h = w * p.h / p.w; }
+              doc.addImage(p.data, 'PNG', d.cell.x + (d.cell.width - w) / 2, d.cell.y + (d.cell.height - h) / 2, w, h);
+            }
+          }
+        }
+      });
+      y = doc.lastAutoTable.finalY + 8;
+    }
+
+    // =====================================================
+    // HALAMAN: DOKUMENTASI
+    // =====================================================
+    newPage();
+    title('DOKUMENTASI KEGIATAN');
+    if (photoUrls.length === 0) {
+      setF('italic', 11.5); doc.text('Belum ada dokumentasi foto.', M, y);
+    } else {
+      photos.forEach((p, i) => {
+        const maxH = 105;
+        if (!p) {
+          ensure(12); setF('italic', 11);
+          doc.text(`(Gambar ${i + 1} tidak dapat dimuat)`, PW / 2, y, { align: 'center' }); y += 12;
+          return;
+        }
+        let h = CW * p.h / p.w, w = CW;
+        if (h > maxH) { h = maxH; w = h * p.w / p.h; }
+        ensure(h + 12);
+        doc.addImage(p.data, 'JPEG', PW / 2 - w / 2, y, w, h);
+        doc.setDrawColor(150); doc.setLineWidth(0.3); doc.rect(PW / 2 - w / 2, y, w, h);
+        y += h + 5;
+        setF('italic', 10); doc.text(`Gambar ${i + 1}. Dokumentasi ${s.nama}`, PW / 2, y, { align: 'center' });
+        y += 10;
+      });
+    }
+
+    // ---------- Nomor halaman ----------
+    const total = doc.getNumberOfPages();
+    for (let i = 1; i <= total; i++) {
+      doc.setPage(i); setF('italic', 9); doc.setTextColor(110);
+      doc.text(`Halaman ${i} dari ${total}`, PW / 2, PH - 10, { align: 'center' });
+      doc.setTextColor(0);
+    }
+
+    // ---------- Tampilkan ----------
+    const url = String(doc.output('bloburl'));
+    if (win) win.location.href = url;
+    else doc.save(`Uman_${s.nama}.pdf`); // jika pop-up diblokir, unduh langsung
+  } catch (err) {
+    console.error('Uman gagal:', err);
+    if (win) win.close();
+    alert('Gagal membuat PDF Umand: ' + err.message);
+  }
 };
 
 window.toggleAllAbsensi = function(cb) {
@@ -2133,12 +3520,29 @@ window.renderRegisterCardContent = function() {
 
     <form onsubmit="return submitRegister(event)" class="flex flex-col anim-fade">
 
+      <!-- Input Gelar Depan & Nama (Sejajar dalam 1 baris) -->
+      <div class="flex gap-3 mb-4">
+        <input
+          id="register-gelar-depan"
+          type="text"
+          placeholder="Gelar Depan (Opsional. Cth: dr., Ns.)"
+          class="w-1/3 bg-white/10 border border-white/20 rounded-xl text-white text-sm py-3.5 px-3 focus:outline-none transition-all focus:border-evergreen"
+        />
+        <input
+          id="register-name"
+          type="text"
+          required
+          placeholder="Nama Lengkap (Tanpa Gelar)"
+          class="w-2/3 bg-white/10 border border-white/20 rounded-xl text-white text-sm py-3.5 px-4 focus:outline-none transition-all focus:border-evergreen"
+        />
+      </div>
+
+      <!-- Input Gelar Belakang -->
       <input
-        id="register-name"
+        id="register-gelar-belakang"
         type="text"
-        required
-        placeholder="Nama Lengkap"
-        class="w-full mb-4 bg-white/10 border border-white/20 rounded-xl text-white text-sm py-3.5 px-4 focus:outline-none"
+        placeholder="Gelar Belakang (Opsional. Cth: M.Kes, S.Kep)"
+        class="w-full mb-4 bg-white/10 border border-white/20 rounded-xl text-white text-sm py-3.5 px-4 focus:outline-none transition-all focus:border-evergreen"
       />
 
       <input
@@ -2236,9 +3640,29 @@ window.submitRegister = async function(e) {
 
   e.preventDefault();
 
-  const name =
-    document.getElementById('register-name').value.trim();
+  const rawGelarDepan = document.getElementById('register-gelar-depan').value.trim();
+  const rawName = document.getElementById('register-name').value.trim();
+  const rawGelarBelakang = document.getElementById('register-gelar-belakang').value.trim();
 
+  // Logika Penggabungan: [Gelar Depan] [Nama], [Gelar Belakang]
+  let name = rawName;
+  
+  if (rawGelarDepan) {
+      name = `${rawGelarDepan} ${name}`;
+  }
+  
+  if (rawGelarBelakang) {
+      // Hilangkan koma jika user tidak sengaja mengetiknya di awal input
+      const cleanGelarBelakang = rawGelarBelakang.startsWith(',') 
+          ? rawGelarBelakang.substring(1).trim() 
+          : rawGelarBelakang;
+      name = `${name}, ${cleanGelarBelakang}`;
+  }
+  
+  // Bersihkan spasi ganda jika ada
+  name = name.replace(/\s+/g, ' ').trim();
+
+  
   const email =
     document.getElementById('register-email').value.trim();
 
@@ -2336,14 +3760,7 @@ window.submitRegister = async function(e) {
      * =====================================================
      */
 
-    const role =
-      (
-        jabatan === "Master Admin" ||
-        jabatan === "Sekretaris Direksi"
-      )
-        ? "admin"
-        : "user";
-
+    const role = job.role;
 
     /*
      * =====================================================
@@ -2369,7 +3786,8 @@ window.submitRegister = async function(e) {
 
       title: jabatan,
 
-      createdAt: new Date().toISOString()
+            createdAt: new Date().toISOString(),
+      ...(job.scopeDirektorat ? { scopeDirektorat: job.scopeDirektorat } : {})
 
     };
 
@@ -2613,10 +4031,10 @@ window.submitLogin = async function(e) {
       return false;
     }
 
-    const successUser = snapshot.val();
+        const successUser = normalizeUser(snapshot.val());
 
-    // CEK ROLE
-    if (successUser.role !== state.loginType) {
+    // CEK ROLE (Direktur Utama boleh masuk lewat menu mana pun)
+    if (successUser.jabatan !== 'Plh.Direktur Utama' && successUser.role !== state.loginType) {
 
       await window.signOut(window.auth);
 
@@ -2632,7 +4050,7 @@ window.submitLogin = async function(e) {
 
     // LOGIN BERHASIL
     state.currentUser = successUser;
-
+    window.applyScopeFilter();
     const root =
       document.getElementById('root');
 
@@ -2694,70 +4112,101 @@ window.logout = function(){
 /* =========================================================================
    TOP BAR (DINAMIS TRANSLUCENT & SOLID)
    ========================================================================= */
+function getTabs(){
+  const cu = state.currentUser;
+  const t = [ ['home','Home','home'], ['schedule','Schedule','calendar-days'], ['task','Task','list-checks'] ];
+  if (cu.role === 'admin' && !cu.scopeDirektorat) {           // hanya Sekretaris Direktur Utama / Master Admin
+    t.push(['rekap','Rekap','clipboard-copy']);
+    t.push(['export','Data','database']);
+  }
+  t.push(['arsip','Arsip','archive']);
+  return t;
+}
+
 function renderTopBar(){
   const cu = state.currentUser;
-  let tabs = [ ['home','Home','home'], ['schedule','Schedule','calendar-days'], ['task','Task','list-checks'] ];
-  
-  // Jika role admin, tambahkan tab Export Data
-  if (cu.role === 'admin') {
-    tabs.push(['export', 'Data', 'database']); // Teks diubah menjadi "Data"
-  }
-  tabs.push(['arsip', 'Arsip', 'archive']);
-
-  const activeIndex = tabs.findIndex(t => t[0] === state.activeTab);
+  const tabs = getTabs();
+  const n = tabs.length;
+  const activeIndex = Math.max(0, tabs.findIndex(t => t[0] === state.activeTab));
   const isHome = state.activeTab === 'home';
-
-  // Logika ukuran dan pergeseran slider dinamis yang lebih seimbang
-  const tabWidthPct = 100 / tabs.length;
-  const sliderStyle = `width: calc(${tabWidthPct}% - 6px); transform: translateX(${activeIndex * 100}%); left: 3px;`;
+  const light = isHome && !state.topScrolled;    // transparan hanya di paling atas halaman Home
+  const sliderStyle = `width: calc((100% - 12px) / ${n}); transform: translateX(${activeIndex * 100}%);`;
+  setTimeout(() => window.renderMobileNav && renderMobileNav(), 0);
 
   return `
-  <div class="${isHome ? 'absolute top-0 left-0 w-full bg-transparent text-white' : 'sticky top-0 bg-white border-b border-gray-200 text-gray-900'} z-40 px-4 py-4 md:px-6 lg:px-8 transition-all duration-500 shadow-sm">
-    <div class="max-w-[90rem] mx-auto flex items-center justify-between gap-4">
-      
+  <div class="${isHome ? 'absolute top-0 left-0 w-full' : 'relative'} ${light ? 'bg-transparent text-white' : 'bg-white/95 backdrop-blur-md text-gray-900 border-b border-gray-200 shadow-sm'} px-3 py-3 md:px-6 lg:px-8 transition-colors duration-300">
+    <div class="max-w-[90rem] mx-auto flex items-center justify-between gap-3">
+
       <div class="flex items-center gap-2 lg:gap-3 shrink-0">
-        <div class="w-10 h-10 rounded-full ${isHome ? 'bg-white/10 border-white/20' : 'bg-gray-100 border-gray-200'} backdrop-blur-md flex items-center justify-center shadow-sm border">
+        <div class="w-10 h-10 rounded-full ${light ? 'bg-white/10 border-white/20' : 'bg-gray-100 border-gray-200'} flex items-center justify-center border">
           ${icon('zap','w-5 h-5 text-evergreen-dark')}
         </div>
-        <span class="font-bold text-xl md:text-2xl tracking-wide hidden sm:block">GASPOL</span>
+        <span class="font-extrabold text-xl tracking-wide">GASPOL</span>
       </div>
 
-      <!-- DIPERLEBAR: max-w-[650px] agar 5 tab tidak berdesakan dan rapi -->
-      <div class="hidden md:flex relative max-w-[650px] w-full ${isHome ? 'bg-white/20 border-white/30' : 'bg-gray-100 border-gray-200'} backdrop-blur-md rounded-full p-1.5 shadow-sm border mx-auto">
-        <div id="tab-slider" class="absolute top-1.5 bottom-1.5 ${isHome ? 'bg-white' : 'bg-white shadow-md'} rounded-full transition-transform duration-300 ease-out z-0" style="${sliderStyle}"></div>
+      <nav class="hidden md:grid relative flex-1 max-w-[760px] mx-auto p-1.5 rounded-full border ${light ? 'bg-white/20 border-white/30 backdrop-blur-md' : 'bg-gray-100 border-gray-200'}" style="grid-template-columns: repeat(${n}, minmax(0, 1fr));">
+        <div id="tab-slider" class="absolute top-1.5 bottom-1.5 left-1.5 bg-white rounded-full shadow-md transition-transform duration-300 ease-out" style="${sliderStyle}"></div>
         ${tabs.map(([key,label,ic]) => `
-          <button onclick="switchTab('${key}')" id="btn-tab-${key}" class="relative z-10 flex-1 flex items-center justify-center gap-2 py-2.5 rounded-full text-sm font-bold transition-colors duration-300 ${state.activeTab===key ? 'text-gray-900' : (isHome ? 'text-white hover:text-white/80' : 'text-gray-500 hover:text-gray-900')}">
-            ${icon(ic,'w-4 h-4')}<span class="hidden lg:inline">${label}</span>
-          </button>
-        `).join('')}
-      </div>
+          <button onclick="switchTab('${key}')" id="btn-tab-${key}" class="relative z-10 flex items-center justify-center gap-2 py-2.5 rounded-full text-sm font-bold whitespace-nowrap transition-all duration-200 active:scale-95 ${state.activeTab===key ? 'text-gray-900' : (light ? 'text-white/90 hover:text-white hover:bg-white/10' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-200/70')}">
+            ${icon(ic,'w-4 h-4')}<span>${label}</span>
+          </button>`).join('')}
+      </nav>
 
-      <div class="flex items-center gap-3 lg:gap-4 shrink-0">
-        <div class="text-right hidden lg:block">
-          <p class="text-sm font-bold leading-tight">${cu.name}</p>
-          <p class="text-[11px] font-medium text-gray-500 leading-tight mt-0.5">${cu.role==='admin' ? cu.title : cu.jabatan}</p>
+      <div class="flex items-center gap-2 lg:gap-4 shrink-0">
+        <div class="text-right hidden lg:block max-w-[260px]">
+          <p class="text-sm font-bold leading-tight truncate">${esc(cu.name)}</p>
+          <p class="text-[11px] font-medium ${light ? 'text-white/70' : 'text-gray-500'} leading-tight mt-0.5 truncate">${esc(cu.role==='admin' ? cu.title : cu.jabatan)}</p>
         </div>
-        <div class="flex items-center gap-2 lg:gap-3 lg:border-l lg:border-gray-300 lg:pl-4">
-          <button onclick="openModal('editProfile')" class="p-2.5 rounded-full ${isHome ? 'bg-white/10 text-white hover:bg-white/20' : 'bg-blue-50 text-blue-600 hover:bg-blue-100'} transition-all shadow-sm flex items-center justify-center" title="Edit Profil Email & Password">
-            ${icon('user-cog','w-4.5 h-4.5')}
+        <div class="flex items-center gap-2 lg:border-l ${light ? 'lg:border-white/30' : 'lg:border-gray-300'} lg:pl-4">
+          <button onclick="openModal('editProfile')" class="w-10 h-10 rounded-full ${light ? 'bg-white/10 text-white hover:bg-white/25' : 'bg-blue-50 text-blue-600 hover:bg-blue-100'} transition-all active:scale-90 flex items-center justify-center" title="Edit Profil">
+            ${icon('user-cog','w-5 h-5')}
           </button>
-          <button onclick="logout()" class="px-4 py-2.5 rounded-full bg-evergreen text-gray-900 font-bold text-sm hover:bg-evergreen-hover hover:scale-105 transition-all duration-300 shadow-sm flex items-center gap-2" title="Keluar">
-            <span class="hidden sm:inline">Logout</span> ${icon('log-out','w-4 h-4')}
+          <button onclick="logout()" class="h-10 px-3 sm:px-4 rounded-full bg-evergreen text-gray-900 font-bold text-sm hover:bg-evergreen-hover hover:shadow-md active:scale-95 transition-all flex items-center gap-2" title="Keluar">
+            <span class="hidden sm:inline">Logout</span>${icon('log-out','w-4 h-4')}
           </button>
         </div>
       </div>
-      
     </div>
   </div>`;
 }
+
+// Navigasi bawah untuk HP
+window.renderMobileNav = function(){
+  let el = document.getElementById('mobile-nav');
+  if (!el) { el = document.createElement('div'); el.id = 'mobile-nav'; document.body.appendChild(el); }
+  const cu = state.currentUser;
+  document.body.classList.toggle('has-mnav', !!cu);
+  if (!cu) { el.innerHTML = ''; return; }
+  el.innerHTML = `
+    <nav class="md:hidden fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur border-t border-gray-200 flex" style="padding-bottom: env(safe-area-inset-bottom)">
+      ${getTabs().map(([k,l,ic]) => {
+        const on = state.activeTab === k;
+        return `<button onclick="switchTab('${k}')" class="flex-1 flex flex-col items-center gap-0.5 py-2 text-[10px] font-bold active:scale-95 transition-all ${on ? 'text-evergreen-dark' : 'text-gray-400'}">
+          <span class="px-4 py-1 rounded-full transition-all ${on ? 'bg-evergreen-light/60' : ''}">${icon(ic,'w-5 h-5')}</span>${l}
+        </button>`;
+      }).join('')}
+    </nav>`;
+  refreshIcons();
+};
+
+// Top bar menjadi putih solid saat halaman Home di-scroll
+window.addEventListener('scroll', () => {
+  if (state.activeTab !== 'home' || !state.currentUser) return;
+  const s = window.scrollY > 40;
+  if (s !== !!state.topScrolled) {
+    state.topScrolled = s;
+    const tb = document.getElementById('topbar');
+    if (tb) { tb.innerHTML = renderTopBar(); refreshIcons(); }
+  }
+}, { passive: true });
 
 /* =========================================================================
    HERO SECTION (HANYA MUNCUL DI HOME, LEBIH PANJANG KE BAWAH)
    ========================================================================= */
 window.renderHero = function(role, currentUser) {
-  // Mengambil maksimal 2 kata pertama dari nama user
-  const nameParts = currentUser.name.split(' ');
-  const shortName = nameParts.slice(0, 2).join(' ');
+    // Ambil nama tanpa gelar belakang, buang koma nyasar, lalu ambil maksimal 2 kata
+    const cleanName = (currentUser.name || '').split(',')[0].replace(/\s+/g, ' ').trim();
+  const shortName = cleanName.split(' ').slice(0, 2).join(' ');
 
   const title = role === 'admin' 
     ? `Hai ${shortName},<br/>Kendalikan Setiap Agenda.` 
@@ -2768,12 +4217,13 @@ window.renderHero = function(role, currentUser) {
     : `Pantau jadwal harian dan pastikan semua tugas divisi ${currentUser.divisi} terselesaikan dengan baik tepat waktu.`;
 
   return `
-  <div class="relative w-full h-[80vh] min-h-[650px] overflow-hidden bg-black flex items-center rounded-b-[2.5rem] shadow-xl">
+  <div class="relative w-full h-[65vh] min-h-[460px] md:h-[80vh] md:min-h-[650px]
+   overflow-hidden bg-black flex items-center rounded-b-[2.5rem] shadow-xl">
     <img src="Home_Page.jpeg" alt="Background Hero" class="absolute inset-0 w-full h-full object-cover z-0 opacity-70 scale-105" />
     <div class="absolute inset-0 z-0 bg-gradient-to-r from-black/80 via-black/40 to-transparent"></div>
     <div class="absolute inset-0 z-0 bg-gradient-to-t from-black/60 via-transparent to-transparent"></div>
 
-    <div class="relative z-10 w-full max-w-[90rem] mx-auto px-6 md:px-8 flex flex-col items-start justify-center text-left anim-page-enter pt-16 pb-32">
+    <div class="relative z-10 w-full max-w-[90rem] mx-auto px-6 md:px-8 flex flex-col items-start justify-center text-left anim-page-enter pt-20 pb-24 md:pt-16 md:pb-32">
       <div class="flex flex-wrap items-center gap-3 mb-6">
         <span class="px-5 py-2 rounded-full bg-white text-gray-900 font-bold text-sm shadow-md">Dashboard</span>
         <span class="px-5 py-2 rounded-full bg-white/20 backdrop-blur-md text-white font-medium text-sm border border-white/30">Operasional</span>
@@ -2799,10 +4249,9 @@ window.switchTab = function(tab){
   // --- EFEK ANIMASI SLIDER MULUS (Tidak Patah-patah) ---
   // Menggeser slider menggunakan JS secara visual sebelum topbar dirender ulang
   const cu = state.currentUser;
-  let tabsList = ['home', 'schedule', 'task'];
-  if (cu && cu.role === 'admin') tabsList.push('export');
-  tabsList.push('arsip');
-  const newIndex = tabsList.indexOf(tab);
+    const newIndex = getTabs().map(t => t[0]).indexOf(tab);
+  state.topScrolled = false;
+  window.scrollTo(0, 0);
 
   const slider = document.getElementById('tab-slider');
   if (slider) {
@@ -3152,9 +4601,18 @@ function renderHomeAdmin(){
 const pendingExtCount = tasks.filter(t => t.extensions && t.extensions.some(ex => ex.status === 'pending')).length;
   const counts = { 'On Progress':0, 'Due Soon':0, 'Overdue':0, 'Completed Late':0, 'Done':0 };
   tasks.forEach(t => counts[getTaskStatus(t)]++);
-  const pieData = Object.entries(counts).map(([name,value])=>({name,value}));
+  // Perbaiki perhitungan pieData agar tidak ada nilai NaN
+  const pieData = [
+    { name: "On Progress", value: tasks.filter(t => !t.done && (new Date(t.deadline).getTime() - new Date().getTime()) > 3 * 24 * 60 * 60 * 1000).length || 0 }, // Lebih dari H-3
+    { name: "Due Soon", value: tasks.filter(t => !t.done && (new Date(t.deadline).getTime() - new Date().getTime()) <= 3 * 24 * 60 * 60 * 1000 && (new Date(t.deadline).getTime() - new Date().getTime()) >= 0).length || 0 }, // H-3 atau kurang
+    { name: "Overdue", value: tasks.filter(t => !t.done && new Date(t.deadline) < new Date(new Date().setHours(0,0,0,0))).length || 0 },
+    { name: "Completed Late", value: tasks.filter(t => t.done && t.reviewStatus !== 'waiting' && t.doneDate > t.deadline).length || 0 },
+    { name: "Done", value: tasks.filter(t => t.done && t.reviewStatus !== 'waiting' && t.doneDate <= t.deadline).length || 0 },
+    { name: "Waiting Approval", value: tasks.filter(t => t.done && t.reviewStatus === 'waiting').length || 0 } // Menambahkan Waiting Approval dengan aman
+  ];
 
-  const divisionStats = getDivisionStats(tasks);
+  const _sc = getScopeDivisi();
+const divisionStats = getDivisionStats(tasks).filter(d => !_sc || _sc.includes(d.divisi));
   const dirCompletion = divisionStats.filter(d => d.type === 'direktorat').sort((a,b)=>b.completionRate-a.completionRate);
   const divCompletion = divisionStats.filter(d => d.type === 'divisi').sort((a,b)=>b.completionRate-a.completionRate);
   const dirOnTime = divisionStats.filter(d => d.type === 'direktorat').sort((a,b)=>b.onTimeRate-a.onTimeRate);
@@ -3163,14 +4621,16 @@ const pendingExtCount = tasks.filter(t => t.extensions && t.extensions.some(ex =
 
   const rankMedal = ['bg-amber-400','bg-slate-300','bg-orange-300'];
 const pendingExtTasks = tasks.filter(t => t.extensions && t.extensions.some(ex => ex.status === 'pending'));
+  const waitingApprovalTasks = tasks.filter(t => t.done && t.reviewStatus === 'waiting');
   // --- FORMAT TANGGAL BARU (Bulan Lengkap & Update Hari Ini) ---
   const todayLongStr = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
 
   return `
   ${renderHero('admin', state.currentUser)}
-  <div id="content-anchor" class="max-w-[90rem] mx-auto px-4 md:px-8 relative z-20 -mt-24 pb-16">
-    <div class="bg-white/95 backdrop-blur-xl rounded-[2.5rem] shadow-[0_20px_40px_rgba(0,0,0,0.08)] border border-white/60 p-6 md:p-10 anim-slideup space-y-8">
-      
+  <div id="content-anchor" class="max-w-[90rem] mx-auto px-4 md:px-8 relative z-20 -mt-20 md:-mt-36 pb-16">
+    <div class="bg-white/95 backdrop-blur-xl rounded-[2.5rem] shadow-[0_20px_40px_rgba(0,0,0,0.08)] border border-white/60 p-4 md:p-10 anim-slideup space-y-8">
+     <div id="backup-reminder-anchor"></div>
+
       <div class="flex items-center justify-between mb-4">
         <h2 class="text-2xl font-bold text-gray-800">Ringkasan Eksekutif</h2>
         <!-- TAMPILAN TANGGAL BARU -->
@@ -3197,53 +4657,142 @@ const pendingExtTasks = tasks.filter(t => t.extensions && t.extensions.some(ex =
         </div>
       </div>
 
+     
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
-        <!-- 1. Daftar Tugas Biasa -->
+<!-- 1. Daftar Tugas per Divisi & PIC -->
         <div class="bg-gray-50 rounded-2xl border border-gray-200 p-5 flex flex-col h-[400px]">
-          <h3 class="font-semibold text-gray-800 mb-4 shrink-0">Daftar Tugas per Divisi &amp; PIC</h3>
-          <div class="overflow-y-auto pr-2 space-y-2 flex-1">
-            ${tasks.map(t => `
-              <button onclick='openTaskDetailById("${t.id}")' class="w-full text-left flex items-center justify-between gap-3 p-3 rounded-xl bg-white border border-gray-100 hover:border-evergreen hover:shadow-sm transition-all duration-200">
-                <div class="min-w-0"><p class="text-sm font-medium text-gray-700 truncate">${t.name}</p><p class="text-xs text-gray-400 mt-0.5">${t.divisi.join(', ')} • ${t.pic.join(', ')}</p></div>
-                ${statusChip(getTaskStatus(t), TASK_STATUS_STYLE)}
-              </button>`).join('')}
-          </div>
-        </div>
+          <h3 class="font-semibold text-gray-800 mb-4 shrink-0">Daftar Tugas per Divisi & PIC</h3>
+          <div class="overflow-y-auto pr-2 space-y-3 flex-1 custom-scrollbar-light"> <!-- Pastikan ada overflow-y-auto -->
+            
+            ${(() => {
+              const todayObj = new Date();
+              const offset = todayObj.getTimezoneOffset() * 60000;
+              const localTodayStr = new Date(todayObj.getTime() - offset).toISOString().split('T')[0];
+              const todayTime = new Date(localTodayStr + 'T00:00:00').getTime();
 
-        <!-- 2. KARTU BARU: Daftar Pengajuan Perpanjangan -->
-        <div class="bg-amber-50/40 rounded-2xl border border-amber-200 p-5 flex flex-col h-[400px] shadow-sm relative overflow-hidden">
-          <div class="absolute top-0 right-0 w-24 h-24 bg-amber-200/30 rounded-bl-full -z-10"></div>
-          <div class="flex items-center justify-between mb-4 shrink-0 z-10">
-            <h3 class="font-semibold text-amber-900 flex items-center gap-2">${icon('clock', 'w-4.5 h-4.5 text-amber-600')} Pengajuan Deadline</h3>
-            <span class="bg-amber-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm">${pendingExtTasks.length}</span>
-          </div>
-          <div class="overflow-y-auto pr-2 space-y-2 flex-1 z-10">
-            ${pendingExtTasks.length === 0 ? '<div class="h-full flex flex-col items-center justify-center opacity-60"><p class="text-sm font-medium text-amber-700">Tidak ada pengajuan perpanjangan waktu.</p></div>' : pendingExtTasks.map(t => {
-              const pendingExt = t.extensions.find(ex => ex.status === 'pending');
-              return `
-              <button onclick='openTaskDetailById("${t.id}")' class="w-full text-left flex items-start gap-3 p-3 rounded-xl bg-white border border-amber-100 hover:border-amber-400 hover:shadow-md transition-all duration-200 active:scale-[0.98]">
-                <div class="min-w-0 flex-1">
-                  <p class="text-sm font-bold text-gray-800 line-clamp-1">${t.name}</p>
-                  <p class="text-[10px] text-gray-500 mt-1 flex items-center gap-1.5">${icon('calendar', 'w-3 h-3')} Req: <span class="font-bold text-amber-600">${fmtDate(pendingExt.reqDate)}</span></p>
-                  <p class="text-[10px] text-gray-400 mt-0.5 truncate bg-gray-50 p-1.5 rounded border border-gray-100">Alasan: ${pendingExt.reason}</p>
+              // Gabungkan tugas yang belum selesai dan tugas yang sudah selesai (tapi belum H+3)
+              const visibleTasks = tasks.filter(t => {
+                if (!t.done) return true; // Tampilkan yang belum selesai
+                if (t.done && t.reviewStatus !== 'waiting') {
+                  // Jika sudah selesai dan disetujui (bukan waiting)
+                  const doneDateNum = new Date(t.doneDate + 'T00:00:00').getTime();
+                  const diffDaysDone = Math.round((todayTime - doneDateNum) / 86400000);
+                  return diffDaysDone < 3; // Tampilkan jika belum lewat 3 hari sejak diselesaikan
+                }
+                return false; // Jangan tampilkan yang masih waiting approval di sini, ada card khususnya
+              });
+
+              if (visibleTasks.length === 0) {
+                 return '<p class="text-sm text-gray-500 italic mt-4 text-center">Tidak ada tugas aktif.</p>';
+              }
+
+              // Urutkan agar tugas selesai (Done) muncul di atas
+              visibleTasks.sort((a, b) => {
+                 if (a.done && !b.done) return -1;
+                 if (!a.done && b.done) return 1;
+                 return 0; // Jika sama-sama done atau belum, biarkan urutan aslinya
+              });
+
+              return visibleTasks.map(t => {
+                let badgeText = "On Progress";
+                let badgeStyle = "bg-slate-100 text-slate-600";
+                
+                if (t.done) {
+                  badgeText = "Done";
+                  badgeStyle = "bg-green-100 text-green-700";
+                } else {
+                   const deadlineTime = new Date(t.deadline + 'T00:00:00').getTime();
+                   const diffDays = Math.round((deadlineTime - todayTime) / 86400000);
+                   
+                   if (diffDays < 0) {
+                     badgeText = "Overdue";
+                     badgeStyle = "bg-red-100 text-red-600";
+                   } else if (diffDays <= 3) { 
+                     badgeText = "Due Soon";
+                     badgeStyle = "bg-yellow-100 text-yellow-700";
+                   }
+                }
+                
+                return `
+                <div onclick='openTaskDetailById("${t.id}")' class="bg-white p-3 rounded-xl border border-gray-100 shadow-sm cursor-pointer hover:border-evergreen/50 transition-colors">
+                  <div class="flex justify-between items-start gap-2 mb-1">
+                    <p class="font-medium text-gray-800 text-sm line-clamp-2 leading-snug">${t.name}</p>
+                    <span class="${badgeStyle} text-[10px] px-2 py-0.5 rounded-full font-bold shrink-0 shadow-sm">${badgeText}</span>
+                  </div>
+                  <p class="text-[10px] text-gray-500">${t.divisi.join(', ')} • ${t.pic.join(', ')}</p>
                 </div>
-                ${icon('chevron-right', 'w-4 h-4 text-amber-300 mt-1 shrink-0')}
-              </button>`
-            }).join('')}
+                `;
+              }).join('');
+            })()}
           </div>
         </div>
 
-        <!-- 3. Progres Tugas -->
-        <div class="bg-gray-50 rounded-2xl border border-gray-200 p-5 flex flex-col items-center justify-center">
+        <!-- 2. KARTU GABUNGAN: Tindak Lanjut Tugas (Approval & Ekstensi) -->
+        <div class="bg-slate-50 rounded-2xl border border-slate-200 p-5 flex flex-col h-[400px] shadow-sm relative overflow-hidden">
+          
+          <!-- Dekorasi Background: Pendaran Cahaya Sudut (Tanpa Titik-titik) -->
+          <div class="absolute top-0 right-0 w-[250px] h-[250px] bg-blue-100/60 rounded-full blur-3xl pointer-events-none -translate-y-1/2 translate-x-1/3"></div>
+          <div class="absolute bottom-0 left-0 w-[250px] h-[250px] bg-rose-100/50 rounded-full blur-3xl pointer-events-none translate-y-1/3 -translate-x-1/3"></div>
+
+          <h3 class="font-semibold text-slate-800 mb-4 shrink-0 flex items-center gap-2 relative z-10">
+            ${icon('alert-circle', 'w-4.5 h-4.5 text-slate-500')} Tindak Lanjut Tugas
+          </h3>
+          
+          <div class="overflow-y-auto pr-2 space-y-5 flex-1 z-10 custom-scrollbar-light">
+            <!-- Section A: Butuh Approval -->
+            <div>
+              <div class="overflow-y-auto pr-2 space-y-5 flex-1 z-10 custom-scrollbar-light max-h-[320px]"></div>
+              <div class="flex justify-between items-center mb-2 border-b border-slate-200 pb-1.5">
+                 <span class="text-[11px] font-bold text-blue-700 uppercase tracking-wide flex items-center gap-1.5">
+                   ${icon('check-circle', 'w-3.5 h-3.5')} WAITING APPROVAL
+                 </span>
+                 <span class="bg-blue-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow-sm">${waitingApprovalTasks.length}</span>
+              </div>
+              <div class="space-y-2">
+                ${waitingApprovalTasks.length === 0 ? '<p class="text-[11px] text-slate-500 italic flex items-center gap-1.5"><span class="w-1 h-1 rounded-full bg-slate-400"></span>Tidak ada tugas menunggu approval.</p>' : waitingApprovalTasks.map(t => `
+                  <button onclick='openTaskDetailById("${t.id}")' class="w-full text-left p-2.5 rounded-xl bg-white border border-slate-200/70 hover:border-blue-300 hover:shadow-md transition-all active:scale-[0.98]">
+                    <p class="text-xs font-bold text-slate-800 line-clamp-1">${t.name}</p>
+                    <p class="text-[9px] text-slate-500 mt-1">${t.divisi.join(', ')}</p>
+                  </button>
+                `).join('')}
+              </div>
+            </div>
+
+            <!-- Section B: Pengajuan Deadline -->
+            <div>
+            <div class="overflow-y-auto pr-2 space-y-5 flex-1 z-10 custom-scrollbar-light max-h-[320px]"></div>
+              <div class="flex justify-between items-center mb-2 border-b border-slate-200 pb-1.5">
+                 <span class="text-[11px] font-bold text-orange-700 uppercase tracking-wide flex items-center gap-1.5">
+                   ${icon('clock', 'w-3.5 h-3.5')} PERPANJANG DEADLINE
+                 </span>
+                 <span class="bg-orange-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow-sm">${pendingExtTasks.length}</span>
+              </div>
+              <div class="space-y-2">
+                ${pendingExtTasks.length === 0 ? '<p class="text-[11px] text-slate-500 italic flex items-center gap-1.5"><span class="w-1 h-1 rounded-full bg-slate-400"></span>Tidak ada pengajuan perpanjangan waktu.</p>' : pendingExtTasks.map(t => `
+                  <button onclick='openTaskDetailById("${t.id}")' class="w-full text-left p-2.5 rounded-xl bg-white border border-slate-200/70 hover:border-orange-300 hover:shadow-md transition-all active:scale-[0.98]">
+                    <p class="text-xs font-bold text-slate-800 line-clamp-1">${t.name}</p>
+                    <p class="text-[9px] text-orange-600 font-medium mt-1 flex items-center gap-1">${icon('clock', 'w-3 h-3')} Menunggu respon</p>
+                  </button>
+                `).join('')}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. Progres Tugas (Donut Chart - Lebih Lebar) -->
+        <div class="bg-gray-50 rounded-2xl border border-gray-200 p-5 flex flex-col items-center justify-center h-[400px]">
           <h3 class="font-semibold text-gray-800 w-full text-left mb-2">Progres Tugas</h3>
-          ${donutChartHtml(pieData)}
-          <div class="grid grid-cols-2 gap-3 mt-4 w-full">
-            ${pieData.map(d => `<div class="flex items-center gap-2 text-xs font-medium text-gray-600 bg-white px-3 py-2 rounded-lg border border-gray-100 shadow-sm"><span class="w-2.5 h-2.5 rounded-full shrink-0 ${TASK_STATUS_STYLE[d.name].dot}"></span><span class="truncate">${d.name} (${d.value})</span></div>`).join('')}
+          <div class="flex-1 flex flex-col items-center justify-center w-full">
+            ${donutChartHtml(pieData)}
+          </div>
+          <div class="grid grid-cols-2 gap-3 w-full shrink-0">
+            ${pieData.map(d => `<div class="flex items-center gap-2 text-[11px] font-medium text-gray-600 bg-white px-3 py-2 rounded-lg border border-gray-100 shadow-sm"><span class="w-2.5 h-2.5 rounded-full shrink-0 ${TASK_STATUS_STYLE[d.name].dot}"></span><span class="truncate">${d.name} (${d.value})</span></div>`).join('')}
           </div>
         </div>
 
       </div>
+
 
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div id="admin-calendar-container" class="bg-gray-50 rounded-2xl border border-gray-200 p-5 h-[420px] overflow-hidden">${adminCalendarHtml()}</div>
@@ -3324,6 +4873,71 @@ const pendingExtTasks = tasks.filter(t => t.extensions && t.extensions.some(ex =
   </div>`;
 }
 
+function userRevisedTasksHtml() {
+  const cu = state.currentUser;
+  const revTasks = tasks.filter(t => t.divisi.includes(cu.divisi) && t.reviewStatus === 'revised' && !t.done);
+  
+  let content = '';
+  if(revTasks.length === 0) {
+    content = `<div class="h-full flex flex-col items-center justify-center opacity-60 min-h-[120px]"><p class="text-sm font-medium text-orange-700">Tidak ada tugas revisi.</p></div>`;
+  } else {
+    content = `<div class="grid grid-cols-1 gap-3 max-h-[300px] overflow-y-auto pr-2">` + revTasks.map(t => `
+      <button onclick='openTaskDetailById("${t.id}")' class="w-full text-left bg-white border border-orange-100 p-3 rounded-xl hover:border-orange-300 hover:shadow-md transition-all active:scale-[0.98]">
+        <p class="text-sm font-bold text-gray-800 line-clamp-1 mb-2">${t.name}</p>
+        <div class="bg-orange-100/50 p-2.5 rounded-lg border border-orange-100 mb-3">
+          <p class="text-xs text-orange-800 line-clamp-2 leading-relaxed"><span class="font-bold">Catatan:</span> ${t.revisionNote}</p>
+        </div>
+        <div class="flex items-center justify-between mt-auto">
+          <p class="text-[10px] text-gray-500 font-bold uppercase flex items-center gap-1.5">${icon('clock', 'w-3 h-3')} DL:${fmtDate(t.deadline)}</p>
+          <span class="px-2 py-1 bg-orange-500 text-white rounded font-bold text-[10px] shadow-sm tracking-wider">REVISI</span>
+        </div>
+      </button>
+    `).join('') + `</div>`;
+  }
+
+  return `
+    <div class="bg-gradient-to-br from-orange-50 to-amber-50 rounded-2xl border border-orange-200 p-5 shadow-[0_4px_20px_rgba(249,115,22,0.1)] flex flex-col relative overflow-hidden h-full">
+      <div class="absolute top-0 right-0 w-24 h-24 bg-orange-200/30 rounded-bl-full -z-10"></div>
+      <div class="flex items-center justify-between mb-4 z-10 shrink-0">
+         <h2 class="font-bold text-orange-800 text-lg flex items-center gap-2">${icon('alert-circle', 'w-5 h-5')} Perlu Revisi Segera</h2>
+         <span class="bg-orange-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm">${revTasks.length}</span>
+      </div>
+      <div class="z-10 flex-1">${content}</div>
+    </div>
+  `;
+}
+
+function userWaitingApprovalHtml() {
+  const cu = state.currentUser;
+  const waitingTasks = tasks.filter(t => t.divisi.includes(cu.divisi) && t.done && t.reviewStatus === 'waiting');
+
+  let content = '';
+  if(waitingTasks.length === 0) {
+    content = `<div class="h-full flex flex-col items-center justify-center opacity-60 min-h-[120px]"><p class="text-sm font-medium text-blue-700">Tidak ada tugas menunggu approval.</p></div>`;
+  } else {
+    content = `<div class="grid grid-cols-1 gap-3 max-h-[300px] overflow-y-auto pr-2">` + waitingTasks.map(t => `
+      <button onclick='openTaskDetailById("${t.id}")' class="w-full text-left bg-white border border-blue-100 p-4 rounded-xl hover:border-blue-300 hover:shadow-md transition-all active:scale-[0.98]">
+        <p class="text-sm font-bold text-gray-800 line-clamp-1 mb-2">${t.name}</p>
+        <div class="flex items-center justify-between mt-auto pt-3 border-t border-blue-50">
+          <p class="text-[10px] text-gray-500 font-bold flex items-center gap-1.5">${icon('calendar', 'w-3 h-3')} Selesai: ${fmtDate(t.doneDate)}</p>
+          <span class="px-2 py-1 bg-blue-500 text-white rounded font-bold text-[10px] shadow-sm tracking-wider">WAITING</span>
+        </div>
+      </button>
+    `).join('') + `</div>`;
+  }
+
+  return `
+    <div class="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl border border-blue-200 p-5 shadow-[0_4px_20px_rgba(59,130,246,0.1)] flex flex-col relative overflow-hidden h-full">
+      <div class="absolute top-0 right-0 w-24 h-24 bg-blue-200/30 rounded-bl-full -z-10"></div>
+      <div class="flex items-center justify-between mb-4 z-10 shrink-0">
+         <h2 class="font-bold text-blue-800 text-lg flex items-center gap-2">${icon('clock', 'w-5 h-5')} Menunggu Approval Admin</h2>
+         <span class="bg-blue-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm">${waitingTasks.length}</span>
+      </div>
+      <div class="z-10 flex-1">${content}</div>
+    </div>
+  `;
+}
+
 function renderHomeUser(){
   const cu = state.currentUser;
   const myTasksAll = tasks.filter(t=>t.divisi.includes(cu.divisi));
@@ -3345,28 +4959,31 @@ function renderHomeUser(){
 
   return `
   ${renderHero('user', cu)}
-  <div id="content-anchor" class="max-w-[90rem] mx-auto px-4 md:px-8 relative z-20 -mt-24 pb-16">
-    <div class="bg-white/95 backdrop-blur-xl rounded-[2.5rem] shadow-[0_20px_40px_rgba(0,0,0,0.08)] border border-white/60 p-6 md:p-10 anim-slideup space-y-8">
+  <div id="content-anchor" class="max-w-[90rem] mx-auto px-4 md:px-8 relative z-20 -mt-20 md:-mt-36 pb-16">
+    <div class="bg-white/95 backdrop-blur-xl rounded-[2.5rem] shadow-[0_20px_40px_rgba(0,0,0,0.08)] border border-white/60 p-4 md:p-10 anim-slideup">
       
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <!-- Container Tugas -->
-        <div id="user-tasks-container" class="lg:col-span-2 bg-gray-50 rounded-2xl border border-gray-200 p-5">
+      <!-- BARIS ATAS: 3 CARD SEJAJAR (TUGAS MASUK, WAITING APPROVAL, REVISI) -->
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-6 items-stretch">
+        <div id="user-tasks-container" class="bg-gray-50 rounded-2xl border border-gray-200 p-5 flex flex-col h-full shadow-sm">
           ${userTasksHtml()}
         </div>
-        <!-- Container Kalender -->
-        <div id="user-calendar-container" class="bg-gray-50 rounded-2xl border border-gray-200 p-5">
-          ${miniCalendarHtml(eventMap, state.selectedDate)}
-        </div>
+        ${userWaitingApprovalHtml()}
+        ${userRevisedTasksHtml()}
       </div>
 
-      <!-- Container Agenda -->
-      <div id="user-meetings-container" class="bg-gray-50 rounded-2xl border border-gray-200 p-5">
-        ${userMeetingsHtml()}
+      <!-- BARIS BAWAH: KALENDER (KIRI) DAN AGENDA MEETING (KANAN) -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div id="user-calendar-container" class="bg-gray-50 rounded-2xl border border-gray-200 p-5 shadow-sm h-fit">
+          ${miniCalendarHtml(eventMap, state.selectedDate)}
+        </div>
+        <div id="user-meetings-container" class="lg:col-span-2 bg-gray-50 rounded-2xl border border-gray-200 p-5 shadow-sm h-full">
+          ${userMeetingsHtml()}
+        </div>
       </div>
 
     </div>
   </div>`;
-} 
+}
 
 /* =========================================================================
    HALAMAN SCHEDULE & TASK (Di-Restore Layout Aslinya, Tanpa Hero Image)
@@ -3568,34 +5185,17 @@ function renderScheduleCards(filtered, isAdmin) {
       let notulensiHtml = `
         <div class="flex flex-wrap gap-2 shrink-0 mt-3 sm:mt-0 w-full sm:w-auto justify-start sm:justify-end">
           
-          <!-- TOMBOL NOTULENSI -->
-          <div class="relative w-auto" onclick="event.stopPropagation()">
-            <button ${notulensiAction} class="${btnClass}">
-              ${icon(btnIcon, 'w-4 h-4')} <span class="hidden lg:inline">${btnText}</span> ${isAdmin ? icon('chevron-down', 'w-3 h-3 ml-1 opacity-70') : ''}
-            </button>
-            
-            ${(isAdmin && state.notulensiMenuId === s.id) ? `
-            <div class="absolute right-0 top-full mt-2 z-20 bg-white rounded-xl shadow-lg border border-gray-100 p-1.5 w-36 anim-popin">
-              <button onclick='openModal("notulensi",{schedule: schedules.find(x=>x.id==="${s.id}"), mode:"view"}); state.notulensiMenuId=null;' class="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-all">${icon('eye','w-4 h-4')} View</button>
-              <button onclick='openModal("notulensi",{schedule: schedules.find(x=>x.id==="${s.id}"), mode:"edit"}); state.notulensiMenuId=null;' class="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-all">${icon('edit-3','w-4 h-4')} Edit</button>
-            </div>` : ''}
-          </div>
-
-          <!-- TOMBOL DOKUMENTASI -->
-          <button onclick='event.stopPropagation(); openModal("dokumentasi", schedules.find(x=>x.id==="${s.id}"))' class="${s.dokumentasi && s.dokumentasi.length > 0 ? 'px-4 py-2 rounded-xl bg-purple-50 text-purple-600 hover:bg-purple-100 text-sm font-bold transition-all flex items-center justify-center gap-2 border border-purple-200 shadow-sm active:scale-95 w-auto' : 'px-4 py-2 rounded-xl bg-gray-50 text-gray-500 hover:bg-gray-100 hover:text-gray-700 text-sm font-bold transition-all flex items-center justify-center gap-2 border border-gray-200 shadow-sm active:scale-95 w-auto'}">
-            ${icon('camera', 'w-4 h-4')} <span class="hidden lg:inline">${s.dokumentasi && s.dokumentasi.length > 0 ? 'Lihat Dokumentasi' : (isAdmin ? 'Isi Dokumentasi' : 'Belum Ada Foto')}</span>
+          <!-- TOMBOL DETAIL (WORKSPACE FULLSCREEN) -->
+          <button onclick='event.stopPropagation(); changeWorkspaceTab("${s.id}", "notulensi")' class="px-5 py-2.5 rounded-xl bg-blue-50 text-blue-600 hover:bg-blue-100 text-sm font-bold transition-all flex items-center justify-center gap-2 border border-blue-200 shadow-sm active:scale-95 w-full sm:w-auto">
+            ${icon('layout-list', 'w-4 h-4')} <span class="hidden lg:inline">Detail</span>
           </button>
 
-          <!-- TAMBAHKAN TOMBOL ABSENSI (HANYA ADMIN) -->
-          ${isAdmin ? `
-          <button onclick='event.stopPropagation(); openModal("absensi", schedules.find(x=>x.id==="${s.id}"))' class="px-4 py-2 rounded-xl bg-emerald-50 text-emerald-600 hover:bg-emerald-100 text-sm font-bold transition-all flex items-center justify-center gap-2 border border-emerald-200 shadow-sm active:scale-95 w-auto">
-            ${icon('check-square', 'w-4 h-4')} <span class="hidden lg:inline">Absensi</span>
-          </button>` : ''}
-
+        
           <!-- TOMBOL UMAND -->
-          <button onclick='event.stopPropagation(); printUmand("${s.id}")' class="px-4 py-2 rounded-xl bg-gray-900 text-white hover:bg-black text-sm font-bold transition-all flex items-center justify-center gap-2 shadow-sm active:scale-95 w-auto">
+          <button onclick='event.stopPropagation(); printUmand("${s.id}")' class="px-5 py-2.5 rounded-xl bg-gray-900 text-white hover:bg-black text-sm font-bold transition-all flex items-center justify-center gap-2 shadow-sm active:scale-95 w-full sm:w-auto">
             ${icon('printer', 'w-4 h-4')} <span class="hidden lg:inline">Umand</span>
           </button>
+          
         </div>
       `;
 
@@ -3708,7 +5308,7 @@ function taskFilterBarHtml(showDivisiUser){
       <div><label class="block text-[10px] text-gray-500 font-bold uppercase mb-1">Status</label>
         <select class="field-input text-sm" onchange="updateTaskFilter('status', this.value)">
           <option value="" ${f.status===''?'selected':''}>Semua</option>
-          ${['On Progress','Due Soon','Overdue','Completed Late','Done'].map(s=>`<option ${f.status===s?'selected':''}>${s}</option>`).join('')}
+          ${['On Progress','Due Soon','Overdue','Waiting Approval','Need Revision','Completed Late','Done'].map(s=>`<option ${f.status===s?'selected':''}>${s}</option>`).join('')}
         </select></div>
       ${showDivisiUser ? `
       <div><label class="block text-[10px] text-gray-500 font-bold uppercase mb-1">Divisi</label>
@@ -3771,6 +5371,7 @@ window.saveNotulensiDraft = function(key) {
 };
 
 window.checkTextSelection = function() {
+  if (isLiteAdmin()) return;
   const editor = document.getElementById('notulensi-editor');
   const btn = document.getElementById('floating-task-btn');
   if(!editor || !btn) return;
@@ -3793,6 +5394,7 @@ window.checkTextSelection = function() {
 };
 
 window.createTaskFromSelection = function() {
+  if (isLiteAdmin()) return;
   if(!currentSelectedRange || !currentSelectedText) return;
   
   // --- LOGIKA BARU: Cari angka terkecil yang "bolong" / belum dipakai ---
@@ -3880,6 +5482,10 @@ window.updateTempPic = function(id, picName, isChecked) {
 window.renderRightPanel = function() {
   const panel = document.getElementById('notulensi-right-panel');
   if(!panel) return;
+   if (isLiteAdmin()) {
+  panel.innerHTML = '<div class="text-center py-12 bg-gray-50 rounded-2xl border border-dashed border-gray-200 text-xs text-gray-500 px-6">Role Sekretaris Direktorat tidak dapat membuat tugas turunan.</div>';
+  return;
+}
 
   if (state.activeTempTaskId) {
     const t = state.tempTasks.find(x => x.id === state.activeTempTaskId);
@@ -3900,33 +5506,25 @@ window.renderRightPanel = function() {
         <div><label class="block text-xs font-bold text-gray-500 uppercase mb-2">Deadline Pengerjaan</label>
           <input type="date" class="field-input text-sm" value="${t.deadline}" onchange="updateTempTask('${t.id}', 'deadline', this.value)" /></div>
         
-        <div><label class="block text-xs font-bold text-gray-500 uppercase mb-2">1. Pilih Divisi</label>
-          <div class="flex flex-wrap gap-2">
-            ${DIVISIONS.map(d => {
-              const checked = t.divisi.includes(d);
-              return `<label class="flex items-center gap-2 p-2 border ${checked ? 'border-evergreen bg-evergreen-light/20 shadow-sm' : 'border-gray-200 bg-white'} rounded-xl cursor-pointer hover:bg-gray-50 text-xs transition-all">
-                <input type="checkbox" ${checked ? 'checked' : ''} onchange="updateTempDivisi('${t.id}', '${d}', this.checked)" class="w-4 h-4 text-evergreen-dark rounded border-gray-300 focus:ring-evergreen" />
-                <span class="font-bold ${checked ? 'text-evergreen-dark' : 'text-gray-600'}">${d}</span>
-              </label>`;
-            }).join('')}
+        <!-- INPUT PENCARIAN PIC SEPERTI ABSENSI -->
+        <div>
+          <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Cari & Pilih PIC Tugas</label>
+          <div class="relative">
+            <input type="text" id="pic-search" placeholder="Ketik nama PIC untuk ditugaskan..." class="field-input text-sm w-full" onkeyup="searchPicTask(event, '${t.id}')" autocomplete="off" />
+            <div id="pic-search-results" class="absolute z-10 w-full bg-white border border-gray-200 rounded-xl shadow-lg mt-1 hidden max-h-48 overflow-y-auto"></div>
+          </div>
+          
+          <div class="flex flex-wrap gap-2 mt-3">
+            ${t.pic.length === 0 ? '<p class="text-[10px] text-gray-400 italic">Belum ada PIC yang dipilih.</p>' : ''}
+            ${t.pic.map(p => `
+              <div class="flex items-center gap-1.5 bg-evergreen-light/40 border border-evergreen text-evergreen-dark px-2.5 py-1 rounded-lg text-xs font-bold">
+                ${p}
+                <button onclick="removeTempPic('${t.id}', '${p}')" class="hover:text-rose-500 transition-colors p-0.5">${icon('x', 'w-3 h-3')}</button>
+              </div>
+            `).join('')}
           </div>
         </div>
-
-        <div><label class="block text-xs font-bold text-gray-500 uppercase mb-2">2. Sesuaikan PIC</label>
-          ${t.divisi.length === 0 ? '<p class="text-xs text-gray-400 bg-gray-50 p-3 rounded-xl text-center italic border border-dashed border-gray-200">Pilih divisi di atas terlebih dahulu.</p>' : `
-          <div class="flex flex-wrap gap-2">
-            ${t.divisi.map(d => {
-              const users = USERS.filter(u => u.divisi === d);
-              return users.map(u => {
-                const checked = t.pic.includes(u.name);
-                return `<label class="flex items-center gap-2 p-2 border ${checked ? 'border-evergreen bg-evergreen-light/20 shadow-sm' : 'border-gray-200 bg-white'} rounded-xl cursor-pointer hover:bg-gray-50 text-xs transition-all">
-                  <input type="checkbox" ${checked ? 'checked' : ''} onchange="updateTempPic('${t.id}', '${u.name}', this.checked)" class="w-4 h-4 text-evergreen-dark rounded border-gray-300 focus:ring-evergreen" />
-                  <span class="font-bold ${checked ? 'text-gray-900' : 'text-gray-600'}">${u.name}</span>
-                </label>`;
-              }).join('');
-            }).join('')}
-          </div>`}
-        </div>
+      </div>
       </div>
       <button onclick="closeTempTaskForm()" class="w-full mt-auto bg-gray-800 hover:bg-gray-900 text-white font-bold py-3 rounded-xl text-sm transition-all shadow-md shrink-0">Simpan Tugas</button>
     `;
@@ -3967,11 +5565,44 @@ window.renderRightPanel = function() {
   refreshIcons();
 };
 
+window.searchPicTask = function(e, taskId) {
+  const val = e.target.value.toLowerCase().trim();
+  const resContainer = document.getElementById('pic-search-results');
+  if(!val) { resContainer.classList.add('hidden'); return; }
+
+  const t = state.tempTasks.find(x => x.id === taskId);
+  const matches = USERS.filter(u => u.name.toLowerCase().includes(val) && !t.pic.includes(u.name)).slice(0, 5);
+
+  resContainer.innerHTML = matches.map(u => `
+    <div class="p-3 hover:bg-gray-50 cursor-pointer border-b border-gray-100 flex flex-col" onclick="addTempPic('${taskId}', '${u.name}', '${u.divisi}')">
+      <span class="font-bold text-gray-800 text-sm">${u.name}</span>
+      <span class="text-[10px] text-gray-500">${u.jabatan}</span>
+    </div>
+  `).join('');
+  resContainer.classList.remove('hidden');
+};
+
+window.addTempPic = function(taskId, picName, picDivisi) {
+  const t = state.tempTasks.find(x => x.id === taskId);
+  if(t) {
+    if(!t.pic.includes(picName)) t.pic.push(picName);
+    if(!t.divisi.includes(picDivisi)) t.divisi.push(picDivisi); // Otomatis mendaftarkan divisinya
+  }
+  document.getElementById('pic-search').value = '';
+  renderRightPanel();
+};
+
+window.removeTempPic = function(taskId, picName) {
+   const t = state.tempTasks.find(x => x.id === taskId);
+   if(t) t.pic = t.pic.filter(p => p !== picName);
+   renderRightPanel();
+};
+
 function taskAdminTableHtml(){
   const filtered = getFilteredTasks(null);
   return `
-  <div class="overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-sm">
-  <table class="w-full text-sm">
+  <div class="overflow-x-auto rounded-3xl border border-gray-200 bg-white shadow-sm">
+  <table class="w-full min-w-[680px] text-sm">
     <thead class="bg-gray-50"><tr class="text-left text-xs text-gray-500 font-bold border-b border-gray-200 uppercase tracking-wider">
       <th class="py-5 px-5">Nama Task</th><th class="py-5 px-5">Deadline</th>
       <th class="py-5 px-5">Divisi</th><th class="py-5 px-5">PIC</th>
@@ -3997,8 +5628,8 @@ function taskAdminTableHtml(){
 function taskUserTableHtml(){
   const filtered = getFilteredTasks(state.currentUser.divisi);
   return `
-  <div class="overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-sm">
-  <table class="w-full text-sm">
+  <div class="overflow-x-auto rounded-3xl border border-gray-200 bg-white shadow-sm">
+  <table class="w-full min-w-[680px] text-sm">
     <thead class="bg-gray-50"><tr class="text-left text-xs text-gray-500 font-bold border-b border-gray-200 uppercase tracking-wider">
       <th class="py-5 px-5">Nama Task</th><th class="py-5 px-5">Deadline</th>
       <th class="py-5 px-5">Divisi</th><th class="py-5 px-5 text-right">Status</th>
@@ -4034,7 +5665,7 @@ function renderTaskAdmin(){
         <h1 class="text-3xl font-extrabold text-White-900">Task</h1>
         <p class="text-gray-500 font-medium mt-1">Tugas dari Direktur Utama untuk seluruh divisi</p>
       </div>
-      <button class="btn-primary" onclick='openModal("addTask", null)'>${icon('plus','w-4 h-4')} add Task</button>
+      ${isLiteAdmin() ? '' : `<button class="btn-primary" onclick='openModal("addTask", null)'>${icon('plus','w-4 h-4')} add Task</button>`}
     </div>
     <div class="bg-white rounded-3xl border border-gray-200 shadow-sm p-6 mb-6">
       ${taskFilterBarHtml(true)}
@@ -4064,22 +5695,28 @@ function renderTaskUser(){
 function renderTabContent(){
   const el = document.getElementById('tab-content');
   if(!el) return;
+  if (state.activeTab === 'rekap' && !window._rekapForce && document.getElementById('rekap-output')) return;
 
   checkAutoDoneSchedules();
   const isAdmin = state.currentUser.role === 'admin';
   let html = '';
   
-  if(state.activeTab === 'home') html = isAdmin ? renderHomeAdmin() : renderHomeUser();
+  if(state.activeTab === 'home') {
+  html = isAdmin ? renderHomeAdmin() : renderHomeUser();
+  if (isAdmin && !isLiteAdmin()) setTimeout(() => window.checkBackupReminder(), 100);
+}
   if(state.activeTab === 'schedule') html = isAdmin ? renderScheduleAdmin() : renderScheduleUser();
   if(state.activeTab === 'task') html = isAdmin ? renderTaskAdmin() : renderTaskUser();
   
   // Rute arsip & export
-  if(state.activeTab === 'export' && isAdmin) html = renderExportAdmin();
-  
+  if(state.activeTab === 'export' && isAdmin && !isLiteAdmin()) html = renderExportAdmin();
+    if (state.activeTab === 'rekap' && isAdmin && !isLiteAdmin()) {
+    html = renderRekapAdmin();
+    setTimeout(() => generateRekap(), 50);
+  }
   // Tab Arsip kini terbuka untuk admin maupun user biasa
   if(state.activeTab === 'arsip') {
-    html = renderArsipAdmin();
-    setTimeout(() => loadArchivedData(), 100); 
+    html = renderArsipAdmin(); 
   }
 
   el.innerHTML = html;
@@ -4095,19 +5732,28 @@ window.handleUploadDokumentasi = async function(input, scheduleId) {
     if(!s.dokumentasi) s.dokumentasi = [];
     if(s.dokumentasi.length >= 2) return alert('Maksimal hanya 2 foto!');
 
-    alert("Mengupload gambar ke server...");
-    const formData = new FormData();
-    formData.append("file", input.files[0]);
-    formData.append("upload_preset", window.CLOUDINARY_PRESET);
-
+    alert("Mengompres dan mengupload gambar...");
+    
     try {
+      // Kompres foto sebelum dikirim
+      const compressedFile = await window.compressImage(input.files[0], 1280, 1280, 0.7);
+      
+      const formData = new FormData();
+      formData.append("file", compressedFile);
+      formData.append("upload_preset", window.CLOUDINARY_PRESET);
+
       const res = await fetch(window.CLOUDINARY_URL, { method: "POST", body: formData });
       const data = await res.json();
       if(data.secure_url) {
-        s.dokumentasi.push(data.secure_url);
+        // --- SISIPKAN KODE INI ---
+        let optimizedUrl = data.secure_url;
+        if (optimizedUrl.includes('/upload/')) {
+            optimizedUrl = optimizedUrl.replace('/upload/', '/upload/f_auto,q_auto/');
+        }
+        // -------------------------
+
+        s.dokumentasi.push(optimizedUrl);
         await window.set(window.ref(window.rtdb, "gaspol_schedules/" + s.id), s);
-        alert("Gambar berhasil diupload!");
-        openModal("dokumentasi", s);
       }
     } catch (err) {
       console.error(err);
@@ -4131,20 +5777,35 @@ function renderExportAdmin() {
   
   return `
   <div class="max-w-[90rem] mx-auto px-4 md:px-8 py-8 anim-slideup">
-    <div class="bg-white rounded-3xl border border-gray-200 shadow-sm p-8 space-y-8">
+    <div class="bg-white rounded-3xl border border-gray-200 shadow-sm p-5 md:p-8 space-y-6 md:space-y-8">
       <div>
         <h2 class="text-2xl font-extrabold text-gray-900 flex items-center gap-2">${icon('database', 'w-6 h-6 text-blue-500')} Pusat Unduh Data Laporan</h2>
         <p class="text-gray-500 text-sm mt-1">Tarik data raw (CSV) seluruh data (termasuk yang sudah diarsipkan) untuk dibuka di Spreadsheet atau Excel.</p>
       </div>
 
-      <div class="p-5 bg-gray-50 border border-gray-200 rounded-2xl flex flex-col sm:flex-row items-end gap-4 max-w-xl">
-        <div class="w-full sm:w-auto flex-1">
+            <div class="p-5 bg-gray-50 border border-gray-200 rounded-2xl grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div>
           <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Pilih Bulan & Tahun</label>
           <input type="month" id="export-month" class="field-input w-full" value="${currentMonth}" />
         </div>
+        <div>
+          <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Divisi</label>
+          <select id="export-divisi" class="field-input w-full">
+            <option value="">Semua Divisi</option>
+            ${DIVISIONS.map(d => `<option value="${d}">${d}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Status</label>
+          <select id="export-status" class="field-input w-full">
+            <option value="">Semua</option>
+            <option value="Done">Selesai</option>
+            <option value="Pending">Belum Selesai</option>
+          </select>
+        </div>
       </div>
 
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-4xl">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <button onclick="downloadCSV('agenda')" class="p-6 border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 rounded-2xl text-left transition-all group">
           <div class="p-3 bg-emerald-500 text-white w-max rounded-xl mb-4 group-hover:scale-110 transition-transform">${icon('calendar-check', 'w-6 h-6')}</div>
           <h3 class="font-bold text-emerald-900 text-lg mb-1">Export Data Agenda</h3>
@@ -4157,15 +5818,42 @@ function renderExportAdmin() {
           <p class="text-xs text-orange-700">Tarik data: Tgl Input, Nama, Detail, Deadline, Divisi, PIC, Progres, Hambatan, Output Bukti, Status.</p>
         </button>
       </div>
+
+    <div class="pt-6 border-t border-gray-100">
+  <h3 class="text-xl font-extrabold text-gray-900 flex items-center gap-2 mb-1">${icon('shield-check','w-5 h-5 text-emerald-500')} Backup & Restore Data</h3>
+  <p class="text-gray-500 text-sm mb-4">Backup otomatis tersimpan tiap hari di server. Unduh juga salinan manual sebagai cadangan tambahan di luar sistem.</p>
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+    <button onclick="downloadFullBackupJSON()" class="p-5 border border-blue-200 bg-blue-50 hover:bg-blue-100 rounded-2xl text-left flex items-center gap-4">
+      <div class="p-3 bg-blue-500 text-white rounded-xl">${icon('download-cloud','w-5 h-5')}</div>
+      <div><h4 class="font-bold text-blue-900">Unduh Backup Sekarang</h4><p class="text-xs text-blue-700 mt-0.5">Simpan salinan data ke komputer (JSON).</p></div>
+    </button>
+    <label class="p-5 border border-rose-200 bg-rose-50 hover:bg-rose-100 rounded-2xl text-left flex items-center gap-4 cursor-pointer">
+      <div class="p-3 bg-rose-500 text-white rounded-xl">${icon('upload-cloud','w-5 h-5')}</div>
+      <div><h4 class="font-bold text-rose-900">Restore dari File</h4><p class="text-xs text-rose-700 mt-0.5">Pulihkan dari file JSON backup (menimpa data saat ini).</p></div>
+      <input type="file" accept=".json" class="hidden" onchange="restoreFromBackupFile(this)" />
+    </label>
+  </div>
+  <div class="bg-gray-50 border border-gray-200 rounded-2xl p-5">
+    <div class="flex items-center justify-between mb-3">
+      <h4 class="font-bold text-gray-800 text-sm flex items-center gap-2">${icon('history','w-4 h-4')} Riwayat Backup Otomatis</h4>
+      <button onclick="loadAutoBackupList()" class="text-xs font-bold text-gray-500 hover:text-evergreen-dark">${icon('refresh-cw','w-3.5 h-3.5')} Muat Ulang</button>
+    </div>
+    <div id="auto-backup-list" class="space-y-2 max-h-72 overflow-y-auto">
+      <p class="text-sm text-gray-400 text-center py-4">Klik "Muat Ulang" untuk menampilkan daftar.</p>
+    </div>
+  </div>
+</div>
+
     </div>
   </div>`;
 }
 
 window.downloadCSV = async function(type) {
   const monthVal = document.getElementById('export-month').value;
-  if (!monthVal) return alert("Pilih bulan terlebih dahulu!");
-
-  alert(`Memproses data ${type} untuk bulan ${monthVal}...`);
+    const divisiVal = (document.getElementById('export-divisi') || {}).value || '';
+  const statusVal = (document.getElementById('export-status') || {}).value || '';
+  
+  if (!monthVal) return openModal('alert', { title: 'Peringatan', msg: 'Pilih bulan terlebih dahulu!' });
 
   try {
     let csvContent = "";
@@ -4173,13 +5861,19 @@ window.downloadCSV = async function(type) {
 
     if (type === 'agenda') {
       const snap = await window.get(window.child(window.ref(window.rtdb), "gaspol_schedules"));
-      csvContent += "Tgl Input,Nama Agenda,Tanggal Agenda,Divisi Hadir,Peserta Hadir,Notulensi Agenda,Foto Dokumentasi 1,Foto Dokumentasi 2\n";
+      csvContent += "Tgl Input,Nama Agenda,Tanggal Agenda,Divisi Hadir,Peserta Hadir,Notulensi Agenda,Foto Dokumentasi 1,Foto Dokumentasi 2,Status\n";
       
       if (snap.exists()) {
         const data = snap.val();
         for (let key in data) {
           const s = data[key];
           if (s.tanggal && s.tanggal.startsWith(monthVal)) {
+            if (divisiVal && (!s.divisi || !s.divisi.includes(divisiVal))) continue;
+            
+            const isDone = s.status === 'Done';
+            if (statusVal === 'Done' && !isDone) continue;
+            if (statusVal === 'Pending' && isDone) continue;
+
             const inputDate = s.inputDate ? fmtDate(s.inputDate) : '-';
             const divStr = s.divisi ? s.divisi.join(' | ') : '';
             const usrStr = s.users ? s.users.join(' | ') : '';
@@ -4187,7 +5881,7 @@ window.downloadCSV = async function(type) {
             const foto1 = (s.dokumentasi && s.dokumentasi[0]) ? s.dokumentasi[0] : '-';
             const foto2 = (s.dokumentasi && s.dokumentasi[1]) ? s.dokumentasi[1] : '-';
 
-            csvContent += `"${inputDate}","${escCSV(s.nama)}","${s.tanggal}","${divStr}","${usrStr}","${notulensiLink}","${foto1}","${foto2}"\n`;
+            csvContent += `"${inputDate}","${escCSV(s.nama)}","${s.tanggal}","${divStr}","${usrStr}","${notulensiLink}","${foto1}","${foto2}","${s.status}"\n`;
           }
         }
       }
@@ -4201,6 +5895,11 @@ window.downloadCSV = async function(type) {
           const t = data[key];
           const tDate = t.inputDate || t.deadline; 
           if (tDate && tDate.startsWith(monthVal)) {
+            if (divisiVal && (!t.divisi || !t.divisi.includes(divisiVal))) continue;
+            
+            if (statusVal === 'Done' && !t.done) continue;
+            if (statusVal === 'Pending' && t.done) continue;
+
             const inputDate = t.inputDate ? fmtDate(t.inputDate) : '-';
             const divStr = t.divisi ? t.divisi.join(' | ') : '';
             const picStr = t.pic ? t.pic.join(' | ') : '';
@@ -4215,24 +5914,350 @@ window.downloadCSV = async function(type) {
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    link.download = `GASPOL_${type}_${monthVal}.csv`;
+    link.download = `GASPOL_Export_${type}_${monthVal}.csv`;
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   } catch (err) {
-    console.error(err);
-    alert("Gagal menarik data dari server.");
+    openModal('alert', { title: 'Error', msg: 'Gagal menarik data dari server.' });
   }
+};
+
+window.BACKUP_RETENTION_DAYS = 14;
+
+// Backup otomatis harian (dipanggil tiap admin login)
+window.autoBackupCheck = async function() {
+  if (!state.currentUser || state.currentUser.role !== 'admin') return;
+  const todayKey = toISO(today);
+  try {
+    const checkSnap = await window.get(window.child(window.ref(window.rtdb), "gaspol_backups/" + todayKey));
+    if (checkSnap.exists()) return; // sudah ada backup hari ini
+
+    const [tSnap, sSnap, uSnap] = await Promise.all([
+      window.get(window.child(window.ref(window.rtdb), "gaspol_tasks")),
+      window.get(window.child(window.ref(window.rtdb), "gaspol_schedules")),
+      window.get(window.child(window.ref(window.rtdb), "gaspol_users"))
+    ]);
+
+    const snapshot = {
+      timestamp: new Date().toISOString(),
+      tasks: tSnap.exists() ? tSnap.val() : {},
+      schedules: sSnap.exists() ? sSnap.val() : {},
+      users: uSnap.exists() ? uSnap.val() : {}
+    };
+    await window.set(window.ref(window.rtdb, "gaspol_backups/" + todayKey), snapshot);
+
+    // Hapus backup lama melebihi masa retensi
+    const allSnap = await window.get(window.child(window.ref(window.rtdb), "gaspol_backups"));
+    if (allSnap.exists()) {
+      const keys = Object.keys(allSnap.val()).sort();
+      if (keys.length > window.BACKUP_RETENTION_DAYS) {
+        const toDelete = keys.slice(0, keys.length - window.BACKUP_RETENTION_DAYS);
+        for (const k of toDelete) await window.remove(window.ref(window.rtdb, "gaspol_backups/" + k));
+      }
+    }
+  } catch (err) { console.error("Auto-backup gagal:", err); }
+};
+
+// Unduh backup manual (JSON) ke komputer
+window.downloadFullBackupJSON = async function() {
+  if (!state.currentUser || state.currentUser.role !== 'admin') return alert('Hanya admin yang dapat mengunduh backup.');
+  try {
+    const [tSnap, sSnap, uSnap] = await Promise.all([
+      window.get(window.child(window.ref(window.rtdb), "gaspol_tasks")),
+      window.get(window.child(window.ref(window.rtdb), "gaspol_schedules")),
+      window.get(window.child(window.ref(window.rtdb), "gaspol_users"))
+    ]);
+    const backupData = {
+      exportedAt: new Date().toISOString(),
+      tasks: tSnap.exists() ? tSnap.val() : {},
+      schedules: sSnap.exists() ? sSnap.val() : {},
+      users: uSnap.exists() ? uSnap.val() : {}
+    };
+    const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+   const monthName = getMonthNameID(today);
+const yearNow = today.getFullYear();
+link.download = `Backup Data ${monthName} ${yearNow}.json`;
+    document.body.appendChild(link); link.click(); document.body.removeChild(link);
+
+    // Catat tanggal unduh terakhir agar bisa dipakai untuk pengingat
+    await window.set(window.ref(window.rtdb, "gaspol_meta/lastManualBackupDownload"), {
+      date: toISO(today),
+      by: state.currentUser.name
+    });
+
+   alert('Backup berhasil diunduh!');
+    // Sembunyikan banner pengingat kalau sedang tampil
+    const banner = document.getElementById('backup-reminder-banner');
+    if (banner) banner.remove();
+  } catch (err) { console.error(err); alert('Gagal mengunduh backup.'); }
+};
+
+// Mengembalikan fungsi restore yang terpotong
+window.executeRestore = async function() {
+  const data = window.tempRestoreData;
+  if (!data) return;
+  try {
+    await Promise.all([
+      window.set(window.ref(window.rtdb, "gaspol_tasks"), data.tasks || {}),
+      window.set(window.ref(window.rtdb, "gaspol_schedules"), data.schedules || {}),
+      window.set(window.ref(window.rtdb, "gaspol_users"), data.users || {})
+    ]);
+    closeModal();
+    openModal('alert', { title: 'Sukses', msg: 'Restore berhasil! Halaman akan dimuat ulang.' });
+    setTimeout(() => location.reload(), 2000);
+  } catch (err) {
+    openModal('alert', { title: 'Gagal', msg: 'Terjadi kesalahan jaringan saat memulihkan data.' });
+  }
+};
+
+window.restoreFromBackupFile = function(input) {
+  const file = input.files[0];
+  if (!file) return;
+  
+  if (!file.name.endsWith('.json')) {
+    openModal('alert', { title: 'Format Salah', msg: 'File yang Anda pilih bukan berformat .json. Pastikan Anda tidak salah memilih file CSV (hasil Export).' });
+    input.value = '';
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = async function(e) {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (!data.tasks && !data.schedules && !data.exportedAt) throw new Error("Struktur JSON salah");
+      openModal('confirmRestore', data);
+    } catch (err) {
+      openModal('alert', { title: 'File Rusak', msg: 'File backup tidak valid atau rusak (Corrupt). Pastikan file JSON tidak pernah dimodifikasi secara manual.' });
+    }
+  };
+  reader.readAsText(file);
+  input.value = '';
+};
+
+window.restoreFromAutoBackup = async function(dateKey) {
+  try {
+    const snap = await window.get(window.child(window.ref(window.rtdb), "gaspol_backups/" + dateKey));
+    if (!snap.exists()) return openModal('alert', { title: 'Gagal', msg: 'Backup tidak ditemukan di server.' });
+    openModal('confirmRestore', snap.val());
+  } catch (err) {
+    openModal('alert', { title: 'Error', msg: 'Gagal menghubungi server untuk memuat backup.' });
+  }
+};
+
+window.BACKUP_REMINDER_THRESHOLD_DAYS = 30;
+
+window.checkBackupReminder = async function() {
+  if (!state.currentUser || state.currentUser.role !== 'admin') return;
+  if (state.backupReminderDismissed) return; // sudah ditutup di sesi ini
+
+  const anchor = document.getElementById('backup-reminder-anchor');
+  if (!anchor) return;
+
+  try {
+    const snap = await window.get(window.child(window.ref(window.rtdb), "gaspol_meta/lastManualBackupDownload"));
+    let daysSince = null;
+    let lastInfo = null;
+
+    if (snap.exists()) {
+      lastInfo = snap.val();
+      const lastDate = new Date(lastInfo.date + 'T00:00:00');
+      daysSince = Math.round((today - lastDate) / 86400000);
+    }
+
+    const neverBackedUp = !snap.exists();
+    const isOverdue = neverBackedUp || daysSince >= window.BACKUP_REMINDER_THRESHOLD_DAYS;
+
+    if (!isOverdue) { anchor.innerHTML = ''; return; }
+
+    const message = neverBackedUp
+      ? 'Belum pernah ada backup manual yang diunduh untuk data GASPOL.'
+      : `Sudah <b>${daysSince} hari</b> sejak backup manual terakhir diunduh (${fmtDate(lastInfo.date)} oleh ${esc(lastInfo.by)}).`;
+
+    anchor.innerHTML = `
+      <div id="backup-reminder-banner" class="mb-6 p-4 bg-amber-50 border border-amber-300 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-sm anim-fade">
+        <div class="flex items-start gap-3">
+          <div class="p-2 bg-amber-400 text-white rounded-xl shrink-0">${icon('alert-triangle', 'w-4.5 h-4.5')}</div>
+          <div>
+            <p class="text-sm font-bold text-amber-900">Waktunya backup data ke luar sistem</p>
+            <p class="text-xs text-amber-700 mt-0.5">${message} Sebaiknya unduh salinan cadangan ke komputer/Drive Anda.</p>
+          </div>
+        </div>
+        <div class="flex gap-2 shrink-0 w-full sm:w-auto">
+          <button onclick="dismissBackupReminder()" class="btn-ghost text-xs px-3 py-2 flex-1 sm:flex-none justify-center">Nanti Saja</button>
+          <button onclick="downloadFullBackupJSON()" class="px-4 py-2 rounded-xl bg-amber-500 text-white text-xs font-bold hover:bg-amber-600 transition-all shadow-sm flex-1 sm:flex-none flex items-center justify-center gap-1.5">${icon('download', 'w-3.5 h-3.5')} Unduh Sekarang</button>
+        </div>
+      </div>`;
+    refreshIcons();
+  } catch (err) {
+    console.error('Gagal cek pengingat backup:', err);
+  }
+};
+
+window.dismissBackupReminder = function() {
+  state.backupReminderDismissed = true;
+  const banner = document.getElementById('backup-reminder-banner');
+  if (banner) banner.remove();
+};
+
+// Daftar + aksi untuk backup otomatis harian yang tersimpan di server
+window.loadAutoBackupList = async function() {
+  const container = document.getElementById('auto-backup-list');
+  if (!container) return;
+  container.innerHTML = '<p class="text-sm text-gray-400 text-center py-4">Memuat...</p>';
+  try {
+    const snap = await window.get(window.child(window.ref(window.rtdb), "gaspol_backups"));
+    if (!snap.exists()) { container.innerHTML = '<p class="text-sm text-gray-400 text-center py-4">Belum ada backup otomatis.</p>'; return; }
+    const data = snap.val();
+    const keys = Object.keys(data).sort().reverse();
+    container.innerHTML = keys.map(k => {
+      const b = data[k];
+      const taskCount = b.tasks ? Object.keys(b.tasks).length : 0;
+      const schedCount = b.schedules ? Object.keys(b.schedules).length : 0;
+      const bDate = b.timestamp ? new Date(b.timestamp) : new Date();
+const displayLabel = `${getMonthNameID(bDate)} ${bDate.getFullYear()} — Minggu ke-${getWeekOfMonth(bDate)}`;
+
+return `<div class="flex items-center justify-between gap-3 p-3 bg-white border border-gray-200 rounded-xl">
+  <div class="min-w-0"><p class="text-sm font-bold text-gray-800">${displayLabel}</p><p class="text-xs text-gray-500">${fmtDate(k)} • ${taskCount} tugas • ${schedCount} agenda</p></div>
+  <div class="flex gap-2 shrink-0">
+ <button onclick="downloadSingleBackup('${k}')" class="px-3 py-1.5 rounded-lg bg-blue-50 text-blue-600 text-xs font-bold hover:bg-blue-100">Unduh</button>
+  <button onclick="restoreFromAutoBackup('${k}')" class="px-3 py-1.5 rounded-lg bg-rose-50 text-rose-600 text-xs font-bold hover:bg-rose-100">Pulihkan</button>
+    </div>
+  </div>`;
+    }).join('');
+  } catch (err) { console.error(err); container.innerHTML = '<p class="text-sm text-rose-500 text-center py-4">Gagal memuat.</p>'; }
+};
+
+window.downloadSingleBackup = async function(weekKey) {
+  if (!state.currentUser || state.currentUser.role !== 'admin') return;
+  const snap = await window.get(window.child(window.ref(window.rtdb), "gaspol_backups/" + weekKey));
+  if (!snap.exists()) return alert('Backup tidak ditemukan.');
+  const backupData = snap.val();
+
+  const backupDate = backupData.timestamp ? new Date(backupData.timestamp) : new Date();
+  const monthName = getMonthNameID(backupDate);
+  const yearBackup = backupDate.getFullYear();
+  const weekLabel = getWeekOfMonth(backupDate); // hasilnya 1, 2, 3, atau 4
+
+  const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = `Backup Data ${monthName} ${yearBackup} (Minggu ke-${weekLabel}).json`;
+  document.body.appendChild(link); link.click(); document.body.removeChild(link);
 };
 
 function escCSV(text) {
   if (!text) return '';
   return text.toString().replace(/"/g, '""').replace(/\n/g, ' '); 
 }
+/* ===== REKAP (WhatsApp) ===== */
+const isoL = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+window.rekapState = window.rekapState || { type: 'agenda', mode: 'harian', date: isoL(new Date()) };
+window.setRekap = function(k, v) {
+  window.rekapState[k] = v;
+  window._rekapForce = true; renderTabContent(); window._rekapForce = false;
+};
 
+function rekapRange(mode, refISO) {
+  const p = refISO.split('-').map(Number);
+  let a = new Date(p[0], p[1]-1, p[2]), b = new Date(a);
+  if (mode === 'mingguan') { a.setDate(a.getDate() - ((a.getDay() + 6) % 7)); b = new Date(a); b.setDate(b.getDate() + 6); }
+  if (mode === 'bulanan')  { a = new Date(p[0], p[1]-1, 1); b = new Date(p[0], p[1], 0); }
+  return { a, b };
+}
+
+window.generateRekap = async function() {
+  const st = window.rekapState, out = document.getElementById('rekap-output'), info = document.getElementById('rekap-info');
+  if (!out) return;
+  out.value = 'Memuat data...';
+  const { a, b } = rekapRange(st.mode, st.date);
+  const from = isoL(a), to = isoL(b);
+  const L = iso => new Date(iso + 'T00:00:00').toLocaleDateString('id-ID', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
+  const cn = name => { const u = (window.USERS || []).find(x => x.name === name); return (u && u.codename) ? u.codename : name; };
+  const periode = st.mode === 'harian' ? L(from)
+    : st.mode === 'mingguan' ? `${L(from)} s.d. ${L(to)}`
+    : a.toLocaleDateString('id-ID', { month:'long', year:'numeric' });
+  const label = { harian:'HARIAN', mingguan:'MINGGUAN', bulanan:'BULANAN' }[st.mode];
+
+  try {
+    let text = '', count = 0;
+    if (st.type === 'agenda') {
+      const snap = await window.get(window.child(window.ref(window.rtdb), 'gaspol_schedules'));
+      const items = (snap.exists() ? Object.values(snap.val()) : [])
+        .filter(s => s.tanggal >= from && s.tanggal <= to && s.status !== 'Hold')
+        .sort((x, y) => (x.tanggal + x.waktu) < (y.tanggal + y.waktu) ? -1 : 1);
+      count = items.length;
+      text = `*REKAP AGENDA ${label}*\n${periode}\n`;
+      if (!items.length) text += '\n_Tidak ada agenda pada periode ini._';
+      items.forEach((s, i) => {
+        const mark = s.status === 'Done' ? '✅ ' : (s.status === 'Canceled' ? '❌ ' : '');
+        const peserta = (s.divisi && s.divisi.length === DIVISIONS.length) ? 'All Leader' : (s.users || []).map(cn).join(', ');
+        text += `\n${i+1}. ${mark}*${s.nama}*\n`
+          + `📅 ${L(s.tanggal)}\n`
+          + `🕐 ${s.waktu} WIB\n`
+          + `📍 ${s.lokasi || '-'}\n`
+          + `🔗 ${s.refLink || '-'}\n`
+          + `👥 Peserta: ${peserta || '-'}\n`;
+      });
+    } else {
+      const snap = await window.get(window.child(window.ref(window.rtdb), 'gaspol_tasks'));
+      const items = (snap.exists() ? Object.values(snap.val()) : [])
+        .filter(t => t.deadline >= from && t.deadline <= to)
+        .sort((x, y) => x.deadline < y.deadline ? -1 : 1);
+      count = items.length;
+      text = `*REKAP TUGAS ${label}*\n${periode}\n`;
+      if (!items.length) text += '\n_Tidak ada tugas dengan deadline pada periode ini._';
+      items.forEach((t, i) => {
+        text += `\n${i+1}. ${t.done ? '✅ ' : ''}*${t.name}*\n`
+          + `⏰ Deadline: ${L(t.deadline)}${t.deadlineTime ? ', ' + t.deadlineTime + ' WIB' : ''}\n`
+          + `🔗 ${t.taskLink || '-'}\n`
+          + `👤 PIC: ${(t.pic || []).map(cn).join(', ') || '-'}\n`;
+      });
+    }
+    out.value = text.trim();
+    if (info) info.textContent = `${from} s.d. ${to}  •  ${count} ${st.type === 'agenda' ? 'agenda' : 'tugas'}`;
+  } catch (err) { console.error(err); out.value = 'Gagal memuat data dari server.'; }
+};
+
+window.copyRekap = async function() {
+  const ta = document.getElementById('rekap-output');
+  if (!ta || !ta.value) return;
+  try { await navigator.clipboard.writeText(ta.value); }
+  catch (e) { ta.select(); document.execCommand('copy'); }
+  alert('Rekap disalin! Tinggal paste di WhatsApp.');
+};
+
+function renderRekapAdmin() {
+  const st = window.rekapState;
+  const seg = (key, opts) => `<div class="inline-flex bg-gray-100 rounded-full p-1 w-full sm:w-auto">${opts.map(([v, l]) =>
+    `<button onclick="setRekap('${key}','${v}')" class="flex-1 sm:flex-none px-4 py-2 rounded-full text-sm font-bold transition-all active:scale-95 ${st[key] === v ? 'bg-white text-gray-900 shadow' : 'text-gray-500 hover:text-gray-900'}">${l}</button>`).join('')}</div>`;
+  return `
+  <div class="max-w-[90rem] mx-auto px-4 md:px-8 py-6 md:py-8 anim-slideup">
+    <div class="bg-white rounded-3xl border border-gray-200 shadow-sm p-5 md:p-8 space-y-6">
+      <div>
+        <h1 class="text-2xl md:text-3xl font-extrabold text-gray-900 flex items-center gap-2">${icon('clipboard-copy','w-7 h-7 text-evergreen-dark')} Rekap</h1>
+        <p class="text-gray-500 text-sm mt-1">Pilih jenis dan periode, lalu salin hasilnya untuk dikirim ke grup WhatsApp.</p>
+      </div>
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 p-4 bg-gray-50 border border-gray-200 rounded-2xl">
+        <div><label class="block text-[10px] text-gray-500 font-bold uppercase mb-1.5">Jenis Rekap</label>${seg('type', [['agenda','Agenda'],['tugas','Tugas']])}</div>
+        <div><label class="block text-[10px] text-gray-500 font-bold uppercase mb-1.5">Periode</label>${seg('mode', [['harian','Harian'],['mingguan','Mingguan'],['bulanan','Bulanan']])}</div>
+        <div><label class="block text-[10px] text-gray-500 font-bold uppercase mb-1.5">Tanggal Acuan</label>
+          <input type="date" class="field-input" value="${st.date}" onchange="if(this.value) setRekap('date', this.value)" /></div>
+      </div>
+      <div id="rekap-info" class="text-xs font-bold text-gray-500"></div>
+      <textarea id="rekap-output" rows="16" class="field-input font-mono text-sm leading-relaxed" style="min-height:280px"></textarea>
+      <div class="flex flex-col sm:flex-row gap-3 sm:justify-end">
+        <button class="btn-ghost justify-center" onclick="generateRekap()">${icon('refresh-cw','w-4 h-4')} Segarkan</button>
+        <button class="btn-primary justify-center" onclick="copyRekap()">${icon('copy','w-4 h-4')} Salin untuk WhatsApp</button>
+      </div>
+    </div>
+  </div>`;
+}
 function mountApp(){
-  if(!state.currentUser){ renderLogin(); return; }
+    if(!state.currentUser){ renderLogin(); if (window.renderMobileNav) renderMobileNav(); return; }
   const root = document.getElementById('root');
   root.innerHTML = `
     <div class="min-h-screen relative">
@@ -4402,6 +6427,8 @@ window.fetchArchivedData = async function() {
         // Filter hak akses divisi jika bukan admin
         if (!isAdmin && !s.divisi.includes(cu.divisi)) return;
         // Filter pilihan dropdown divisi (jika admin memilih divisi tertentu)
+        const sc = getScopeDivisi();
+if (sc && !(s.divisi || []).some(d => sc.includes(d))) return;
         if (isAdmin && selectedDivisi && !s.divisi.includes(selectedDivisi)) return;
 
         // Filter Tanggal
@@ -4416,6 +6443,8 @@ window.fetchArchivedData = async function() {
     }
 
     countScheds.textContent = `${archivedScheds.length} ditemukan`;
+        window._archivedSchedCache = {};
+    archivedScheds.forEach(s => { window._archivedSchedCache[s.id] = s; });
     if (archivedScheds.length === 0) {
       schedContainer.innerHTML = `<p class="text-sm text-gray-400 py-6 text-center bg-gray-50 rounded-2xl">Tidak ada arsip agenda yang sesuai.</p>`;
     } else {
@@ -4426,11 +6455,8 @@ window.fetchArchivedData = async function() {
             <p class="text-xs text-gray-500 mt-1">${fmtDate(s.tanggal)} • ${s.waktu} • Divisi: ${s.divisi.join(', ')}</p>
           </div>
           <div class="flex items-center gap-2">
-            <button onclick='openModal("notulensi", {schedule: ${JSON.stringify(s).replace(/'/g, "&apos;")}, mode:"view"})' class="px-3 py-1.5 rounded-xl bg-blue-50 text-blue-600 font-bold text-xs hover:bg-blue-100 transition-all flex items-center gap-1.5 shadow-sm">
-              ${icon('file-text', 'w-3.5 h-3.5')} Lihat Notulensi
-            </button>
-            <button onclick='openModal("dokumentasi", ${JSON.stringify(s).replace(/'/g, "&apos;")})' class="px-3 py-1.5 rounded-xl bg-purple-50 text-purple-600 font-bold text-xs hover:bg-purple-100 transition-all flex items-center gap-1.5 shadow-sm">
-              ${icon('camera', 'w-3.5 h-3.5')} Foto (${s.dokumentasi ? s.dokumentasi.length : 0})
+            <button onclick='printUmand("${s.id}")' class="px-5 py-2.5 rounded-xl bg-gray-900 text-white hover:bg-black text-sm font-bold transition-all flex items-center justify-center gap-2 shadow-sm active:scale-95">
+            ${icon('printer', 'w-4 h-4')} Umand
             </button>
           </div>
         </div>
@@ -4452,6 +6478,8 @@ window.fetchArchivedData = async function() {
         // Filter hak akses divisi jika bukan admin
         if (!isAdmin && !t.divisi.includes(cu.divisi)) return;
         // Filter dropdown divisi admin
+        const sc = getScopeDivisi();
+if (sc && !(t.divisi || []).some(d => sc.includes(d))) return;
         if (isAdmin && selectedDivisi && !t.divisi.includes(selectedDivisi)) return;
 
         // Filter Tanggal Deadline
@@ -4481,13 +6509,15 @@ window.fetchArchivedData = async function() {
         </div>
       `).join('');
     }
-
+    refreshIcons();
   } catch (err) {
     console.error("Gagal memuat arsip:", err);
     alert("Gagal mengambil data arsip dari server.");
   }
 };
-
+if (state.currentUser && state.currentUser.role === 'admin') {
+  window.autoBackupCheck();
+}
 mountApp();
 </script>
 </body>
