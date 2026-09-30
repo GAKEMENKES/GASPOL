@@ -118,6 +118,21 @@ div[data-by]::after {
   #toast-container > div { max-width: none; }
 }
 
+/* Perbaikan input tanggal/jam di iPhone Safari */
+input[type="date"], input[type="time"], input[type="month"], input[type="datetime-local"] {
+  -webkit-appearance: none; appearance: none;
+  display: block; width: 100%; max-width: 100%; min-width: 0;
+  min-height: 2.75rem; box-sizing: border-box;
+  text-align: left; line-height: 1.5;
+}
+input[type="date"]::-webkit-date-and-time-value,
+input[type="time"]::-webkit-date-and-time-value,
+input[type="month"]::-webkit-date-and-time-value { text-align: left; min-height: 1.5em; margin: 0; }
+/* Anak grid/flex boleh mengecil, jangan mendorong keluar */
+.grid > *, .flex > label, .flex > div { min-width: 0; }
+.flex > input.field-input { flex: 1 1 0%; min-width: 0; }
+.field-input { max-width: 100%; }
+
 </style>
 </head>
 <body class="bg-[#1a1a1a] text-white">
@@ -2174,7 +2189,7 @@ if(type === 'reviewTask') {
         <label class="block mb-4"><span class="block text-sm font-medium text-gray-600 mb-1.5">Detail Task</span>
           <textarea id="et-desk" class="field-input min-h-[90px] resize-none" required>${t.desc}</textarea></label>
 
-        <div class="grid grid-cols-2 gap-4 mb-4">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
           <label class="block"><span class="block text-sm font-medium text-gray-600 mb-1.5">Tanggal Deadline</span>
             <input type="date" id="et-deadline" class="field-input" value="${t.deadline}" required /></label>
           <label class="block"><span class="block text-sm font-medium text-gray-600 mb-1.5">Waktu Deadline</span>
@@ -2416,7 +2431,7 @@ if (type === 'alert') {
         <label class="block mb-4"><span class="block text-sm font-medium text-gray-600 mb-1.5">Nama Agenda</span>
           <input id="as-nama" class="field-input" required /></label>
         
-        <div class="grid grid-cols-2 gap-4 mb-4">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
           <label class="block"><span class="block text-sm font-medium text-gray-600 mb-1.5">Tanggal</span>
             <input type="date" id="as-tanggal" class="field-input" required /></label>
           <label class="block"><span class="block text-sm font-medium text-gray-600 mb-1.5">Waktu (Mulai - Selesai)</span>
@@ -2540,7 +2555,7 @@ if (type === 'alert') {
         <label class="block mb-4"><span class="block text-sm font-medium text-gray-600 mb-1.5">Detail Task</span>
           <textarea id="at-desk" class="field-input min-h-[90px] resize-none" required></textarea></label>
           
-        <div class="grid grid-cols-2 gap-4 mb-4">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
           <label class="block"><span class="block text-sm font-medium text-gray-600 mb-1.5">Tanggal Deadline</span>
             <input type="date" id="at-deadline" class="field-input" required /></label>
           <label class="block"><span class="block text-sm font-medium text-gray-600 mb-1.5">Waktu Deadline</span>
