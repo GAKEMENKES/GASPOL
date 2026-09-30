@@ -889,8 +889,9 @@ activeTab: localStorage.getItem('gaspol_activeTab') || 'home',
 window.state = state;
 // Sekretaris Direktorat = admin dengan scopeDirektorat
 // Direktur Utama diperlakukan sebagai admin penuh (walau di database masih tersimpan role "user")
+window.isDirut = cu => !!cu && (String(cu.jabatan || '').trim().toLowerCase() === 'direktur utama' || cu.divisi === 'Direktur Utama');
 window.normalizeUser = function(u) {
-  if (u && u.jabatan === 'Plh.Direktur Utama') u.role = 'admin';
+  if (window.isDirut(u)) u.role = 'admin';
   return u;
 };
 window.isLiteAdmin = function() {
@@ -903,6 +904,8 @@ window.getScopeDivisi = function() {
   if (!cu || cu.role !== 'admin' || !cu.scopeDirektorat) return null;
   return [cu.scopeDirektorat, ...(HIERARCHY[cu.scopeDirektorat] || [])];
 };
+
+
 // Saring tugas & agenda sesuai scope
 window.applyScopeFilter = function() {
   const sc = window.getScopeDivisi();
@@ -911,6 +914,16 @@ window.applyScopeFilter = function() {
   window.schedules = f(window._rawSchedules || []);
 };
 
+/* ===== CAKUPAN TAMPILAN USER (Direktur = direktorat + divisi bawahannya) ===== */
+window.getViewDivisi = function(cu) {
+  cu = cu || window.state.currentUser;
+  if (cu && HIERARCHY[cu.divisi]) return [cu.divisi, ...HIERARCHY[cu.divisi]];
+  return [cu ? cu.divisi : ''];
+};
+window.inMyScope = list => (window.isDirut(window.state.currentUser) || window.state.currentUser.role === 'admin')
+  ? true
+  : (list || []).some(d => window.getViewDivisi().includes(d));
+window.scopedTasks = () => (state.currentUser.role === 'admin' || window.isDirut(state.currentUser)) ? tasks : tasks.filter(t => inMyScope(t.divisi));
 /* ===== HAK AKSES AGENDA (berbasis pembuat) ===== */
 window.isFullAdmin = function() {
   const cu = window.state && window.state.currentUser;
@@ -1217,19 +1230,27 @@ window.initLiveNotulensi = function(scheduleId) {
 };
 
 // Pecah nama lengkap menjadi gelar depan, nama, dan gelar belakang
+// Daftar gelar depan yang dikenali (dengan/tanpa titik, huruf besar/kecil)
+const FRONT_TITLES = /^(dr|drg|dra|drs|ns|ners|prof|ir|h|hj|apt|kh)\.?$/i;
+const titleKey = t => t.toLowerCase().replace(/\./g, '');
+
+// Pecah nama lengkap menjadi gelar depan, nama, dan gelar belakang
 window.parseName = function(full) {
   const parts = (full || '').split(',').map(x => x.trim()).filter(Boolean);
   const main = parts.shift() || '';
   const toks = main.split(/\s+/).filter(Boolean);
-  const front = [];
-  while (toks.length > 1 && /^[A-Za-z]{1,5}\.$/.test(toks[0])) front.push(toks.shift());
+  const front = [], seen = new Set();
+  while (toks.length > 1 && (FRONT_TITLES.test(toks[0]) || /^[A-Za-z]{1,5}\.$/.test(toks[0]))) {
+    const t = toks.shift();
+    if (!seen.has(titleKey(t))) { seen.add(titleKey(t)); front.push(t); }   // buang gelar ganda
+  }
   return { front: front.join(' '), name: toks.join(' '), back: parts.join(', ') };
 };
 
-// Gabungkan kembali dengan rapi: tanpa koma nyasar dan tanpa gelar ganda
+// Gabungkan kembali dengan rapi: gelar yang diisi menggantikan gelar lama
 window.buildName = function(front, name, back) {
-  const p = window.parseName(name);            // jaga-jaga jika gelar ikut terketik di kolom nama
-  const f = (front || p.front || '').trim();
+  const p = window.parseName(name);
+  const f = (front || '').trim() || p.front;
   const seen = new Set(), backs = [];
   (String(back || '') + ',' + p.back).split(',').forEach(x => {
     const t = x.trim();
@@ -1717,11 +1738,11 @@ notulensiHtml = `
   if(type === 'statDetail') {
     const mode = payload; wide = true;
     let filteredTasks = [];
-    if(mode === 'total') { title = "Total Seluruh Tugas"; filteredTasks = tasks; }
-    if(mode === 'done') { title = "Daftar Tugas Selesai"; filteredTasks = tasks.filter(t=>t.done); }
-    if(mode === 'progress') { title = "Daftar Tugas Belum Selesai (On Progress)"; filteredTasks = tasks.filter(t=>!t.done && daysDiff(t.deadline) >= 0); }
-    if(mode === 'overdue') { title = "Daftar Tugas Lewat Deadline"; filteredTasks = tasks.filter(t=> !t.done && daysDiff(t.deadline) < 0); }
-    if(mode === 'pendingExt') { title = "Menunggu Persetujuan Ekstensi"; filteredTasks = tasks.filter(t=> t.extensions && t.extensions.some(ex => ex.status === 'pending')); }
+        if(mode === 'total') { title = "Total Seluruh Tugas"; filteredTasks = scopedTasks(); }
+    if(mode === 'done') { title = "Daftar Tugas Selesai"; filteredTasks = scopedTasks().filter(t=>t.done); }
+    if(mode === 'progress') { title = "Daftar Tugas Belum Selesai"; filteredTasks = scopedTasks().filter(t=>!t.done); }
+    if(mode === 'overdue') { title = "Daftar Tugas Lewat Deadline"; filteredTasks = scopedTasks().filter(t=> !t.done && daysDiff(t.deadline) < 0); }
+    if(mode === 'pendingExt') { title = "Menunggu Persetujuan Ekstensi"; filteredTasks = scopedTasks().filter(t=> t.extensions && t.extensions.some(ex => ex.status === 'pending')); }
     
     body = `
       <div class="max-h-[60vh] overflow-y-auto pr-2 space-y-2">
@@ -4153,9 +4174,9 @@ function renderTopBar(){
       </nav>
 
       <div class="flex items-center gap-2 lg:gap-4 shrink-0">
-        <div class="text-right hidden lg:block max-w-[260px]">
-          <p class="text-sm font-bold leading-tight truncate">${esc(cu.name)}</p>
-          <p class="text-[11px] font-medium ${light ? 'text-white/70' : 'text-gray-500'} leading-tight mt-0.5 truncate">${esc(cu.role==='admin' ? cu.title : cu.jabatan)}</p>
+                <div class="text-right hidden lg:block max-w-[340px]">
+          <p class="text-sm font-bold leading-tight break-words">${esc(cu.name)}</p>
+          <p class="text-[11px] font-medium ${light ? 'text-white/70' : 'text-gray-500'} leading-tight mt-0.5 break-words">${esc(cu.role==='admin' ? cu.title : cu.jabatan)}</p>
         </div>
         <div class="flex items-center gap-2 lg:border-l ${light ? 'lg:border-white/30' : 'lg:border-gray-300'} lg:pl-4">
           <button onclick="openModal('editProfile')" class="w-10 h-10 rounded-full ${light ? 'bg-white/10 text-white hover:bg-white/25' : 'bg-blue-50 text-blue-600 hover:bg-blue-100'} transition-all active:scale-90 flex items-center justify-center" title="Edit Profil">
@@ -4513,8 +4534,8 @@ window.updateUserDashboardPartial = function() {
   if (meetingsContainer) meetingsContainer.innerHTML = userMeetingsHtml();
   if (calendarContainer) {
     const cu = state.currentUser;
-    const myTasksAll = tasks.filter(t=>t.divisi.includes(cu.divisi));
-    const myMeetingsAll = schedules.filter(s=>s.divisi.includes(cu.divisi));
+    const myTasksAll = scopedTasks();
+    const myMeetingsAll = schedules.filter(s=>inMyScope(s.divisi));
     
     // Memetakan tanggal mana saja yang ada Tugas dan Agenda
     const eventMap = {};
@@ -4538,7 +4559,7 @@ window.updateUserDashboardPartial = function() {
 
 function userTasksHtml() {
   const cu = state.currentUser;
-  let myTasks = tasks.filter(t=>t.divisi.includes(cu.divisi)).sort((a,b)=> a.deadline<b.deadline?-1:1);
+  let myTasks = scopedTasks().sort((a,b)=> a.deadline<b.deadline?-1:1);
   if (state.selectedDate) myTasks = myTasks.filter(t => t.deadline === state.selectedDate);
   const titleText = state.selectedDate ? `Tugas Masuk: ${fmtDateShort(state.selectedDate)}` : "Tugas Masuk";
 
@@ -4555,8 +4576,8 @@ function userTasksHtml() {
 
 function userMeetingsHtml() {
   const cu = state.currentUser;
-  let myMeetings = schedules.filter(s=>s.divisi.includes(cu.divisi) && s.status !== 'Hold').sort((a,b)=> a.tanggal<b.tanggal?-1:1);
-  const holdMeetings = schedules.filter(s=>s.divisi.includes(cu.divisi) && s.status === 'Hold');
+  let myMeetings = schedules.filter(s=>inMyScope(s.divisi) && s.status !== 'Hold').sort((a,b)=> a.tanggal<b.tanggal?-1:1);
+  const holdMeetings = schedules.filter(s=>inMyScope(s.divisi) && s.status === 'Hold');
   
   if (state.selectedDate) myMeetings = myMeetings.filter(s => s.tanggal === state.selectedDate);
   const titleText = state.selectedDate ? `Meeting Bersama Direktur Utama: ${fmtDateShort(state.selectedDate)}` : "Meeting Bersama Direktur Utama";
@@ -4875,7 +4896,7 @@ const pendingExtTasks = tasks.filter(t => t.extensions && t.extensions.some(ex =
 
 function userRevisedTasksHtml() {
   const cu = state.currentUser;
-  const revTasks = tasks.filter(t => t.divisi.includes(cu.divisi) && t.reviewStatus === 'revised' && !t.done);
+  const revTasks = scopedTasks().filter(t => t.reviewStatus === 'revised' && !t.done);
   
   let content = '';
   if(revTasks.length === 0) {
@@ -4909,7 +4930,7 @@ function userRevisedTasksHtml() {
 
 function userWaitingApprovalHtml() {
   const cu = state.currentUser;
-  const waitingTasks = tasks.filter(t => t.divisi.includes(cu.divisi) && t.done && t.reviewStatus === 'waiting');
+  const waitingTasks = scopedTasks().filter(t => t.done && t.reviewStatus === 'waiting');
 
   let content = '';
   if(waitingTasks.length === 0) {
@@ -4938,10 +4959,40 @@ function userWaitingApprovalHtml() {
   `;
 }
 
+function userSummaryHtml(){
+  const my = scopedTasks();
+  const total = my.length;
+  const done = my.filter(t => t.done).length;
+  const notDone = total - done;
+  const overdue = my.filter(t => getTaskStatus(t) === 'Overdue').length;
+  const todayLongStr = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+  return `
+  <div class="flex items-center justify-between gap-3 flex-wrap mb-4">
+    <h2 class="text-xl md:text-2xl font-bold text-gray-800">Ringkasan Tugas</h2>
+    <span class="flex items-center gap-2 text-xs md:text-sm font-bold text-evergreen-dark bg-evergreen-light/30 px-4 py-2 rounded-full border border-evergreen-light shadow-sm">
+      ${icon('calendar', 'w-4 h-4')} ${todayLongStr}
+    </span>
+  </div>
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mb-6">
+    <div class="stat-card bg-slate-800 cursor-pointer hover:scale-[1.02] transition-transform" onclick="openModal('statDetail', 'total')">
+      <div class="flex items-center justify-between"><div><p class="text-sm opacity-90 text-white">Total Tugas</p><p class="text-3xl font-bold mt-1 text-white">${total}</p></div><div class="p-2.5 bg-white/10 rounded-xl">${icon('clipboard-list','w-5 h-5 text-white')}</div></div>
+    </div>
+    <div class="stat-card bg-evergreen text-gray-900 cursor-pointer hover:scale-[1.02] transition-transform" onclick="openModal('statDetail', 'done')">
+      <div class="flex items-center justify-between"><div><p class="text-sm opacity-90 font-bold">Tugas Selesai</p><p class="text-3xl font-bold mt-1">${done}</p></div><div class="p-2.5 bg-black/10 rounded-xl">${icon('check-circle-2','w-5 h-5 text-gray-900')}</div></div>
+    </div>
+    <div class="stat-card bg-slate-600 cursor-pointer hover:scale-[1.02] transition-transform" onclick="openModal('statDetail', 'progress')">
+      <div class="flex items-center justify-between"><div><p class="text-sm opacity-90 text-white">Belum Selesai</p><p class="text-3xl font-bold mt-1 text-white">${notDone}</p></div><div class="p-2.5 bg-white/10 rounded-xl">${icon('clock','w-5 h-5 text-white')}</div></div>
+    </div>
+    <div class="stat-card bg-pink-500 cursor-pointer hover:scale-[1.02] transition-transform" onclick="openModal('statDetail', 'overdue')">
+      <div class="flex items-center justify-between"><div><p class="text-sm opacity-90 text-white">Lewat Deadline</p><p class="text-3xl font-bold mt-1 text-white">${overdue}</p></div><div class="p-2.5 bg-white/20 rounded-xl">${icon('alert-triangle','w-5 h-5 text-white')}</div></div>
+    </div>
+  </div>`;
+}
+
 function renderHomeUser(){
   const cu = state.currentUser;
-  const myTasksAll = tasks.filter(t=>t.divisi.includes(cu.divisi));
-  const myMeetingsAll = schedules.filter(s=>s.divisi.includes(cu.divisi));
+  const myTasksAll = scopedTasks();
+  const myMeetingsAll = schedules.filter(s=>inMyScope(s.divisi));
   
   const eventMap = {};
   myTasksAll.forEach(t => { 
@@ -4960,8 +5011,8 @@ function renderHomeUser(){
   return `
   ${renderHero('user', cu)}
   <div id="content-anchor" class="max-w-[90rem] mx-auto px-4 md:px-8 relative z-20 -mt-20 md:-mt-36 pb-16">
-    <div class="bg-white/95 backdrop-blur-xl rounded-[2.5rem] shadow-[0_20px_40px_rgba(0,0,0,0.08)] border border-white/60 p-4 md:p-10 anim-slideup">
-      
+        <div class="bg-white/95 backdrop-blur-xl rounded-[2.5rem] shadow-[0_20px_40px_rgba(0,0,0,0.08)] border border-white/60 p-6 md:p-10 anim-slideup">
+      ${userSummaryHtml()}
       <!-- BARIS ATAS: 3 CARD SEJAJAR (TUGAS MASUK, WAITING APPROVAL, REVISI) -->
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-6 items-stretch">
         <div id="user-tasks-container" class="bg-gray-50 rounded-2xl border border-gray-200 p-5 flex flex-col h-full shadow-sm">
@@ -5030,7 +5081,7 @@ window.resetScheduleFilters = function(){ state.scheduleFilters = {start:'',end:
 
 function getFilteredSchedules(scopeDivisi){
   const f = state.scheduleFilters; let list = schedules;
-  if(scopeDivisi) list = list.filter(s => s.divisi.includes(scopeDivisi));
+  if(scopeDivisi) list = list.filter(s => inMyScope(s.divisi));
   return list.filter(s => {
     if(f.start && s.tanggal < f.start) return false;
     if(f.end && s.tanggal > f.end) return false;
@@ -5334,7 +5385,7 @@ window.resetTaskFilters = function(){ state.taskFilters = {start:'',end:'',nama:
 
 function getFilteredTasks(scopeDivisi){
   const f = state.taskFilters; let list = tasks;
-  if(scopeDivisi) list = list.filter(t => t.divisi.includes(scopeDivisi));
+  if(scopeDivisi) list = list.filter(t => inMyScope(t.divisi));
   return list.filter(t => {
     if(f.start && t.deadline < f.start) return false;
     if(f.end && t.deadline > f.end) return false;
@@ -5695,6 +5746,7 @@ function renderTaskUser(){
 function renderTabContent(){
   const el = document.getElementById('tab-content');
   if(!el) return;
+    normalizeUser(state.currentUser);
   if (state.activeTab === 'rekap' && !window._rekapForce && document.getElementById('rekap-output')) return;
 
   checkAutoDoneSchedules();
@@ -6258,7 +6310,8 @@ function renderRekapAdmin() {
 }
 function mountApp(){
     if(!state.currentUser){ renderLogin(); if (window.renderMobileNav) renderMobileNav(); return; }
-  const root = document.getElementById('root');
+    normalizeUser(state.currentUser);
+    const root = document.getElementById('root');
   root.innerHTML = `
     <div class="min-h-screen relative">
       <div id="topbar"></div>
