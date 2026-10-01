@@ -55,7 +55,7 @@
   #root {
     transition: opacity 0.5s cubic-bezier(0.4, 0, 0.2, 1), transform 0.5s cubic-bezier(0.4, 0, 0.2, 1);
   }
-
+.no-anim .anim-slideup, .no-anim .anim-page-enter, .no-anim .anim-fade { animation: none !important; }
   ::-webkit-scrollbar { width: 8px; height: 8px; }
   ::-webkit-scrollbar-thumb { background: #9CA3AF; border-radius: 999px; }
   ::-webkit-scrollbar-track { background: transparent; }
@@ -133,6 +133,12 @@ input[type="month"]::-webkit-date-and-time-value { text-align: left; min-height:
 .flex > input.field-input { flex: 1 1 0%; min-width: 0; }
 .field-input { max-width: 100%; }
 
+/* Tabel di notulensi */
+table.notulensi-table { border-collapse: collapse; margin: 6px 0; max-width: 100%; }
+table.notulensi-table td, table.notulensi-table th { border: 1px solid #9ca3af; padding: 4px 8px; min-width: 48px; vertical-align: top; }
+
+#notulensi-editor span[data-temp-id] { display: inline !important; }
+#notulensi-editor span[data-temp-id] [contenteditable="false"] { user-select: none; }
 </style>
 </head>
 <body class="bg-[#1a1a1a] text-white">
@@ -620,6 +626,7 @@ window.applyScopeFilter();
     if (typeof mountApp === 'function') {
       mountApp();
     }
+    if (window.handleUmandLink) window.handleUmandLink();
   });
 </script>
 
@@ -1199,6 +1206,65 @@ window.guardForeignBlock = function(e) {
   sel.removeAllRanges(); sel.addRange(r);
 };
 
+window.handleEditorBlankClick = function(e) {
+  const ed = e.currentTarget;
+  if (e.target !== ed) return;                        // hanya klik di area kosong editor
+  let target = ed.lastElementChild;
+  const empty = target && target.textContent.replace(/\u200b/g, '').trim() === '' && !target.querySelector('table');
+  if (!empty) {
+    target = document.createElement('div');
+    target.dataset.bid = _newBid(); target.dataset.by = state.currentUser.name;
+    target.innerHTML = '<br>';
+    ed.appendChild(target);
+  }
+  const r = document.createRange(); r.setStart(target, 0); r.collapse(true);
+  const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+  ed.focus();
+};
+
+// Enter = baris baru dalam blok yang sama; Shift+Enter = blok baru (label penulis baru)
+window.handleNotulensiKey = function(e) {
+  if (e.key !== 'Enter' || e.isComposing) return;
+  e.preventDefault();
+  const sel = window.getSelection();
+  let n = sel.anchorNode; if (n && n.nodeType === 3) n = n.parentElement;
+  const inCell = !!(n && n.closest && n.closest('td,th'));
+  if (e.shiftKey && !inCell) document.execCommand('insertParagraph');
+  else document.execCommand('insertLineBreak');
+};
+
+// Simpan posisi kursor (dipakai tombol Sisipkan Tabel)
+window._nRange = null;
+window.saveNotulensiRange = function() {
+  const ed = document.getElementById('notulensi-editor'), sel = window.getSelection();
+  if (ed && sel.rangeCount && ed.contains(sel.anchorNode)) window._nRange = sel.getRangeAt(0).cloneRange();
+};
+
+window.insertNotulensiTable = function() {
+  const ed = document.getElementById('notulensi-editor'); if (!ed) return;
+  const rows = Math.min(30, Math.max(1, parseInt(document.getElementById('nt-rows').value) || 3));
+  const cols = Math.min(10, Math.max(1, parseInt(document.getElementById('nt-cols').value) || 3));
+  ed.focus();
+  const sel = window.getSelection();
+  if (window._nRange) { sel.removeAllRanges(); sel.addRange(window._nRange); }
+  const html = '<table class="notulensi-table"><tbody>' + ('<tr>' + '<td><br></td>'.repeat(cols) + '</tr>').repeat(rows) + '</tbody></table><div><br></div>';
+  document.execCommand('insertHTML', false, html);
+};
+
+// Tempel tabel dari Excel/Word/Docs: dibersihkan lalu dimasukkan sebagai tabel
+window.handleNotulensiPaste = function(e) {
+  const html = e.clipboardData && e.clipboardData.getData('text/html');
+  if (!html || !/<table/i.test(html)) return;      // selain tabel: perilaku normal
+  e.preventDefault();
+  const clean = DOMPurify.sanitize(html, {
+    ALLOWED_TAGS: ['table','thead','tbody','tfoot','tr','td','th','br','b','strong','i','em','u','p','div','span'],
+    ALLOWED_ATTR: ['colspan','rowspan','style','bgcolor','align']
+  });
+  const tmp = document.createElement('div'); tmp.innerHTML = clean;
+  tmp.querySelectorAll('table').forEach(t => t.classList.add('notulensi-table'));
+  document.execCommand('insertHTML', false, tmp.innerHTML);
+};
+
 window.initLiveNotulensi = function(scheduleId) {
   window.stopLiveNotulensi();
   const editor = document.getElementById('notulensi-editor');
@@ -1647,7 +1713,17 @@ notulensiHtml = `
                  ${savedDraft !== null ? `<span class="text-amber-500 text-[10px] bg-amber-50 px-2 py-0.5 rounded">*Draft dipulihkan</span>` : ''}
               </div>
            </label>
-                      <div id="notulensi-editor" contenteditable="true" 
+           <div class="flex items-center gap-2 mb-2 shrink-0 text-xs">
+  <span class="font-bold text-gray-500 uppercase tracking-wider">Tabel:</span>
+  <input id="nt-rows" type="number" min="1" max="30" value="3" class="field-input text-xs" style="width:4rem;flex:none;padding:.25rem .5rem" title="Baris" />
+  <span class="text-gray-400">×</span>
+  <input id="nt-cols" type="number" min="1" max="10" value="3" class="field-input text-xs" style="width:4rem;flex:none;padding:.25rem .5rem" title="Kolom" />
+  <button type="button" onclick="insertNotulensiTable()" class="px-3 py-1.5 rounded-lg bg-gray-900 text-white font-bold hover:bg-black flex items-center gap-1.5">${icon('table','w-3.5 h-3.5')} Sisipkan Tabel</button>
+  <span class="text-[10px] text-gray-400 italic hidden md:inline">atau Ctrl+V tabel dari Excel/Word</span>
+</div>
+              <div id="notulensi-editor" contenteditable="true" 
+              onclick="handleEditorBlankClick(event)"
+              onkeydown="handleNotulensiKey(event)"
               onbeforeinput="guardForeignBlock(event)"
               oninput="stampNotulensiAuthor(); saveNotulensiDraft('${draftKey}'); if(typeof triggerTyping === 'function') triggerTyping('${s.id}')"
               onmouseup="checkTextSelection()" 
@@ -3088,13 +3164,14 @@ window.toggleNotulensiMenu = function(id) {
 };
 
 // Fungsi Print Umand
-window.printUmand = async function(id) {
+window.printUmand = async function(id, opts) {
     const s = schedules.find(x => x.id === id) || (window._archivedSchedCache || {})[id];
   if (!s) return;
   s.divisi = s.divisi || []; s.users = s.users || []; s.dokumentasi = s.dokumentasi || []; s.hadir = s.hadir || [];
 
   // Buka tab dulu (sinkron dengan klik) agar tidak diblokir pop-up blocker
-  const win = window.open('', '_blank');
+     const sameTab = !!(opts && opts.sameTab);
+   const win = sameTab ? null : window.open('', '_blank');
   if (win) win.document.write('<p style="font-family:sans-serif;padding:24px;color:#555">Menyiapkan dokumen PDF…</p>');
 
   try {
@@ -3135,24 +3212,26 @@ window.printUmand = async function(id) {
     const tglRapat = longDate(s.tanggal);
     const tglCetak = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
     const waktuStr = (s.waktu || '-') + ' WIB';
-    // Notula = pembuat agenda (agenda lama tanpa createdBy -> Sekretaris Direksi)
-let notula = USERS.find(u => u.id === s.createdBy);
-if (!notula || notula.jabatan === 'Master Admin' || notula.jabatan === 'Plh.Direktur Utama') {
-  notula = USERS.find(u => u.jabatan === 'Sekretaris Direksi') || state.currentUser;
+    // Notulis = pembuat agenda (agenda lama tanpa createdBy -> Sekretaris Direksi)
+let notulis = USERS.find(u => u.id === s.createdBy);
+if (!notulis || notulis.jabatan === 'Master Admin' || notulis.jabatan === 'Plh.Direktur Utama') {
+  notulis = USERS.find(u => u.jabatan === 'Sekretaris Direksi') || state.currentUser;
 }
 const DIREKTUR_BY_SCOPE = {
   'Direktorat SDMPP':  'Direktur SDM, Pendidikan, dan Penelitian',
   'Direktorat PKLO':   'Direktur Keuangan, Perencanaan, dan Layanan Operasional',
   'Direktorat Yanmed': 'Direktur Pelayanan Medik'
 };
-const direkturJabatan = notula.scopeDirektorat ? DIREKTUR_BY_SCOPE[notula.scopeDirektorat] : 'Direktur Utama';
-const direktur = USERS.find(u => u.jabatan === direkturJabatan) || {};
-const notulaName = notula.name || '';
-const notulaJabatan = notula.jabatan || 'Notula';
+const direkturJabatan = notulis.scopeDirektorat ? DIREKTUR_BY_SCOPE[notulis.scopeDirektorat] : 'Direktur Utama';
+const direktur = USERS.find(u => u.jabatan === direkturJabatan)
+  || (!notulis.scopeDirektorat ? USERS.find(u => u.jabatan === 'Plh.Direktur Utama' || u.divisi === 'Direktur Utama') : null)
+  || {};
+const notulisName = notulis.name || '';
+const notulisJabatan = notulis.jabatan || 'Notulis';
 const direkturName = direktur.name || '';
-    // Muat TTD notula, direktur, dan peserta hadir (PNG transparan)
+    // Muat TTD notulis, direktur, dan peserta hadir (PNG transparan)
     const loadTtd = u => (u && u.ttd) ? loadImg(u.ttd, 'image/png', 2000) : Promise.resolve(null);
-    const [notulaTtd, direkturTtd] = await Promise.all([loadTtd(notula), loadTtd(direktur)]);
+    const [notulisTtd, direkturTtd] = await Promise.all([loadTtd(notulis), loadTtd(direktur)]);
     const hadirTtd = {};
     await Promise.all((s.hadir || []).map(async n => {
       hadirTtd[n] = await loadTtd(USERS.find(x => x.name === n));
@@ -3160,10 +3239,41 @@ const direkturName = direktur.name || '';
     const jabatanOf = n => (USERS.find(u => u.name === n) || {}).jabatan || 'Peserta Luar / Tamu';
 
     // Notulensi HTML -> teks polos (badge nomor tugas dibuang)
+        const notulensiTables = [];
+    const toRGB = col => {
+      if (!col) return null;
+      const x = document.createElement('canvas').getContext('2d');
+      x.fillStyle = '#010203'; x.fillStyle = col;
+      const v = x.fillStyle;
+      if (v === '#010203') return null;
+      let rgb;
+      if (v[0] === '#') rgb = [1, 3, 5].map(i => parseInt(v.substr(i, 2), 16));
+      else { const m = v.match(/[\d.]+/g); if (!m || (m.length > 3 && +m[3] === 0)) return null; rgb = m.slice(0, 3).map(Number); }
+      return rgb.every(n => n > 250) ? null : rgb;
+    };
+    const cellText = c => {
+      const x = document.createElement('div');
+      x.innerHTML = c.innerHTML.replace(/<br\s*\/?>/gi, '\n').replace(/<\/(div|p|li)>/gi, '\n');
+      return x.textContent.replace(/\u00a0/g, ' ').trim();
+    };
     const notulensiText = (() => {
       const d = document.createElement('div');
       d.innerHTML = DOMPurify.sanitize(s.notulensi || '');
       d.querySelectorAll('span[data-temp-id] > span.bg-evergreen-dark').forEach(n => n.remove());
+      d.querySelectorAll('table').forEach(t => {
+        if (t.parentElement && t.parentElement.closest('table')) return;
+        const rows = Array.from(t.rows).map(tr => Array.from(tr.cells).map(c => {
+          const o = { content: cellText(c), colSpan: c.colSpan || 1, rowSpan: c.rowSpan || 1, styles: {} };
+          if (c.tagName === 'TH') o.styles.fontStyle = 'bold';
+          const bg = toRGB(c.style.backgroundColor || c.getAttribute('bgcolor'));
+          if (bg) o.styles.fillColor = bg;
+          return o;
+        }));
+        notulensiTables.push(rows);
+        const ph = document.createElement('div');
+        ph.textContent = '\n[[TABLE:' + (notulensiTables.length - 1) + ']]\n';
+        t.replaceWith(ph);
+      });
       const d2 = document.createElement('div');
       d2.innerHTML = d.innerHTML.replace(/<br\s*\/?>/gi, '\n').replace(/<\/(div|p|li|h[1-6])>/gi, '\n').replace(/<li[^>]*>/gi, '• ');
       return d2.textContent.replace(/\u00a0/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
@@ -3246,10 +3356,8 @@ const HW = PW - HDR_M * 2;      // 190 mm                                   // u
         doc.addImage(img.data, 'PNG', cx - w / 2, centerY - h / 2, w, h);
       }
       setF('bold', 11.5);
-      if (name) {
+            if (name) {
         doc.text(name, cx, ny, { align: 'center' });
-        const nw = doc.getTextWidth(name);
-        doc.setLineWidth(0.3); doc.line(cx - nw / 2, ny + 1, cx + nw / 2, ny + 1);
       } else {
         doc.text('(................................)', cx, ny, { align: 'center' });
       }
@@ -3283,7 +3391,7 @@ const HW = PW - HDR_M * 2;      // 190 mm                                   // u
     para('Demikian disampaikan. Atas perhatian dan kerja sama Bapak/Ibu, kami ucapkan terima kasih.');
 
         ensure(65); y += 8;
-        signature(PW - M - 38, ['Notula,', notulaJabatan], notulaName, 72, 0, notulaTtd);
+        signature(PW - M - 38, [direktur.jabatan || direkturJabatan], direkturName, 72, 0, direkturTtd);
 
     // =====================================================
     // HALAMAN 2+: NOTULENSI
@@ -3301,8 +3409,21 @@ const HW = PW - HDR_M * 2;      // 190 mm                                   // u
       setF('italic', 11.5); doc.text('Belum ada notulensi untuk agenda ini.', M, y); y += lh();
         } else {
       setF('normal', 11.5);
-      notulensiText.split('\n').forEach(p => {
+            notulensiText.split('\n').forEach(p => {
+        const tm = p.trim().match(/^\[\[TABLE:(\d+)\]\]$/);
+        if (tm) {
+          ensure(20);
+          doc.autoTable({
+            startY: y, body: notulensiTables[+tm[1]], theme: 'grid',
+            styles: { font: 'times', fontSize: 10.5, cellPadding: 2, lineColor: [80, 80, 80], lineWidth: 0.2, textColor: 20, valign: 'top' },
+            margin: { top: contentTop, left: M, right: M, bottom: 20 },
+            didDrawPage: () => drawHeader()
+          });
+          y = doc.lastAutoTable.finalY + 4;
+          return;
+        }
         if (!p.trim()) { y += lh() * 0.6; return; }
+    
         const lines = doc.splitTextToSize(p, CW);
         lines.forEach((line, i) => {
           ensure(lh());
@@ -3322,10 +3443,10 @@ const HW = PW - HDR_M * 2;      // 190 mm                                   // u
     }
 
         ensure(65); y += 10;
-    const nLines = ['Notula,', notulaJabatan];
+    const nLines = ['Notulis,', notulisJabatan];
     const dLines = ['Mengetahui,', direkturJabatan];
     const rowN = Math.max(sigLines(nLines, 78).length, sigLines(dLines, 78).length);
-        signature(M + CW * 0.25, nLines, notulaName, 78, rowN, notulaTtd);
+        signature(M + CW * 0.25, nLines, notulisName, 78, rowN, notulisTtd);
     signature(M + CW * 0.75, dLines, direkturName, 78, rowN, direkturTtd);
     y += 45;
 
@@ -3403,9 +3524,10 @@ const HW = PW - HDR_M * 2;      // 190 mm                                   // u
     }
 
     // ---------- Tampilkan ----------
-    const url = String(doc.output('bloburl'));
-    if (win) win.location.href = url;
-    else doc.save(`Uman_${s.nama}.pdf`); // jika pop-up diblokir, unduh langsung
+       const url = String(doc.output('bloburl'));
+   if (win) win.location.href = url;
+   else if (sameTab) window.location.replace(url);
+   else doc.save(`Uman_${s.nama}.pdf`); // jika pop-up diblokir, unduh langsung
   } catch (err) {
     console.error('Uman gagal:', err);
     if (win) win.close();
@@ -3413,19 +3535,23 @@ const HW = PW - HDR_M * 2;      // 190 mm                                   // u
   }
 };
 
-window.toggleAllAbsensi = function(cb) {
-  const checkboxes = document.querySelectorAll('.absensi-cb');
-  checkboxes.forEach(c => {
-    c.checked = cb.checked;
-    // Update styling border secara otomatis
-    const label = c.closest('label');
-    if (cb.checked) {
-      label.classList.add('bg-emerald-50/30', 'border-emerald-300');
-    } else {
-      label.classList.remove('bg-emerald-50/30', 'border-emerald-300');
-    }
-  });
-};/* =========================================================================
+window.handleUmandLink = async function() {
+  const id = new URLSearchParams(location.search).get('umand');
+  if (!id || window._umandHandled || !window.state.currentUser) return;
+  window._umandHandled = true;
+  for (let i = 0; i < 40 && !(window.USERS || []).length; i++) await new Promise(r => setTimeout(r, 250)); // tunggu data user
+  try {
+    const snap = await window.get(window.child(window.ref(window.rtdb), 'gaspol_schedules/' + id));
+    if (!snap.exists()) return alert('Dokumen Umand tidak ditemukan.');
+    const s = snap.val();
+    s.divisi = s.divisi || []; s.users = s.users || []; s.dokumentasi = s.dokumentasi || []; s.hadir = s.hadir || [];
+    window._archivedSchedCache = window._archivedSchedCache || {};
+    window._archivedSchedCache[id] = s;
+    await window.printUmand(id, { sameTab: true });
+  } catch (e) { console.error(e); alert('Gagal membuka Umand.'); }
+};
+
+/* =========================================================================
    LOGIN SCREEN
    ========================================================================= */
 window.startLoginFlow = function() {
@@ -4638,14 +4764,8 @@ const pendingExtCount = tasks.filter(t => t.extensions && t.extensions.some(ex =
   const counts = { 'On Progress':0, 'Due Soon':0, 'Overdue':0, 'Completed Late':0, 'Done':0 };
   tasks.forEach(t => counts[getTaskStatus(t)]++);
   // Perbaiki perhitungan pieData agar tidak ada nilai NaN
-  const pieData = [
-    { name: "On Progress", value: tasks.filter(t => !t.done && (new Date(t.deadline).getTime() - new Date().getTime()) > 3 * 24 * 60 * 60 * 1000).length || 0 }, // Lebih dari H-3
-    { name: "Due Soon", value: tasks.filter(t => !t.done && (new Date(t.deadline).getTime() - new Date().getTime()) <= 3 * 24 * 60 * 60 * 1000 && (new Date(t.deadline).getTime() - new Date().getTime()) >= 0).length || 0 }, // H-3 atau kurang
-    { name: "Overdue", value: tasks.filter(t => !t.done && new Date(t.deadline) < new Date(new Date().setHours(0,0,0,0))).length || 0 },
-    { name: "Completed Late", value: tasks.filter(t => t.done && t.reviewStatus !== 'waiting' && t.doneDate > t.deadline).length || 0 },
-    { name: "Done", value: tasks.filter(t => t.done && t.reviewStatus !== 'waiting' && t.doneDate <= t.deadline).length || 0 },
-    { name: "Waiting Approval", value: tasks.filter(t => t.done && t.reviewStatus === 'waiting').length || 0 } // Menambahkan Waiting Approval dengan aman
-  ];
+  const _pieOrder = ['On Progress','Due Soon','Overdue','Need Revision','Completed Late','Done','Waiting Approval'];
+const pieData = _pieOrder.map(n => ({ name: n, value: tasks.filter(t => getTaskStatus(t) === n).length }));
 
   const _sc = getScopeDivisi();
 const divisionStats = getDivisionStats(tasks).filter(d => !_sc || _sc.includes(d.divisi));
@@ -4724,11 +4844,14 @@ const pendingExtTasks = tasks.filter(t => t.extensions && t.extensions.some(ex =
               }
 
               // Urutkan agar tugas selesai (Done) muncul di atas
-              visibleTasks.sort((a, b) => {
-                 if (a.done && !b.done) return -1;
-                 if (!a.done && b.done) return 1;
-                 return 0; // Jika sama-sama done atau belum, biarkan urutan aslinya
-              });
+            const _rank = t => {
+              if (t.done) return 3;                                   // Done paling bawah
+              const dd = Math.round((new Date(t.deadline + 'T00:00:00').getTime() - todayTime) / 86400000);
+              if (dd < 0) return 2;                                   // Overdue
+              if (dd <= 3) return 1;                                  // Due Soon
+              return 0;                                               // On Progress paling atas
+           };
+visibleTasks.sort((a, b) => _rank(a) - _rank(b) || (a.deadline < b.deadline ? -1 : a.deadline > b.deadline ? 1 : 0));
 
               return visibleTasks.map(t => {
                 let badgeText = "On Progress";
@@ -5112,10 +5235,23 @@ function getFilteredSchedules(scopeDivisi){
 window.exportSchedulePDF = function() {
   const { jsPDF } = window.jspdf; const doc = new jsPDF('landscape');
   doc.setFontSize(14); doc.text("Laporan Agenda & Notulensi (GASPOL)", 14, 15);
-  const data = getFilteredSchedules(state.currentUser.role==='admin'?null:state.currentUser.divisi).map(s => [
-    fmtDate(s.tanggal), s.nama, s.status, s.divisi.join(', '), s.users.join(', '), s.notulensi ? 'Lihat di Sistem' : 'Kosong'
+  const base = window.location.origin + window.location.pathname;
+  const list = getFilteredSchedules(state.currentUser.role==='admin'?null:state.currentUser.divisi);
+  const data = list.map(s => [
+    fmtDate(s.tanggal), s.nama, s.status, s.divisi.join(', '), s.users.join(', '), 'Buka Umand'
   ]);
-  doc.autoTable({ head: [['Tanggal', 'Judul Agenda', 'Status', 'Divisi', 'Peserta', 'Notulensi']], body: data, startY: 22, styles: { fontSize: 8 } });
+  doc.autoTable({
+    head: [['Tanggal', 'Judul Agenda', 'Status', 'Divisi', 'Peserta', 'Notulensi']],
+    body: data, startY: 22, styles: { fontSize: 8 },
+    didParseCell: d => {
+      if (d.section === 'body' && d.column.index === 5) { d.cell.styles.textColor = [37, 99, 235]; d.cell.styles.fontStyle = 'bold'; }
+    },
+    didDrawCell: d => {
+      if (d.section === 'body' && d.column.index === 5) {
+        doc.link(d.cell.x, d.cell.y, d.cell.width, d.cell.height, { url: base + '?umand=' + list[d.row.index].id });
+      }
+    }
+  });
   doc.save('Laporan_Agenda.pdf');
 }
 
@@ -5418,9 +5554,9 @@ window.exportTaskPDF = function() {
   doc.setFontSize(14); doc.text("Laporan Data Tugas (GASPOL)", 14, 15);
   const data = getFilteredTasks(state.currentUser.role==='admin'?null:state.currentUser.divisi).map(t => [
     fmtDate(t.inputDate || new Date(parseInt(t.id.substring(1))).toISOString().slice(0,10)), 
-    t.name, (t.desc||'').substring(0, 40)+'...', fmtDate(t.deadline), getTaskStatus(t), t.divisi.join(', '), t.pic.join(', '), 'Admin'
+    t.name, (t.desc||'').substring(0, 40)+'...', fmtDate(t.deadline), getTaskStatus(t), t.divisi.join(', '), t.pic.join(', ')
   ]);
-  doc.autoTable({ head: [['Tgl Input', 'Judul Tugas', 'Detail', 'Deadline', 'Status', 'Divisi', 'PIC', 'Penginput']], body: data, startY: 22, styles: { fontSize: 8 } });
+  doc.autoTable({ head: [['Tgl Input', 'Judul Tugas', 'Detail', 'Deadline', 'Status', 'Divisi', 'PIC']], body: data, startY: 22, styles: { fontSize: 8 } });
   doc.save('Laporan_Task.pdf');
 }
 
@@ -5479,13 +5615,13 @@ window.createTaskFromSelection = function() {
   const tempId = 'qt-' + Date.now();
   const span = document.createElement('span');
   
-  span.className = 'bg-evergreen-light/50 text-evergreen-dark font-bold pr-1.5 py-0.5 mx-0.5 rounded cursor-pointer border border-evergreen-light hover:bg-evergreen transition-colors inline-flex items-center align-middle shadow-sm';
+  span.className = 'bg-evergreen-light/50 text-evergreen-dark font-bold pr-1.5 py-0.5 mx-0.5 rounded cursor-pointer border border-evergreen-light hover:bg-evergreen transition-colors shadow-sm';
   span.setAttribute('data-temp-id', tempId);
   span.setAttribute('data-original-text', currentSelectedText); 
   span.setAttribute('onclick', `editTempTask('${tempId}')`);
   
   // Memasukkan angka nextNum yang sudah dikalkulasi
-  span.innerHTML = `<span class="inline-flex items-center justify-center bg-evergreen-dark text-white rounded-full min-w-[16px] h-4 text-[9px] mx-1 shadow-sm leading-none">${nextNum}</span><span>${esc(currentSelectedText)}</span>`;
+  span.innerHTML = `<span contenteditable="false" class="inline-flex items-center justify-center bg-evergreen-dark text-white rounded-full min-w-[16px] h-4 text-[9px] mx-1 shadow-sm leading-none">${nextNum}</span><span>${esc(currentSelectedText)}</span>`;
 
   currentSelectedRange.deleteContents();
   currentSelectedRange.insertNode(span);
@@ -5786,8 +5922,15 @@ function renderTabContent(){
     html = renderArsipAdmin(); 
   }
 
+    const isRefresh = window._lastRenderedTab === state.activeTab && el.childElementCount > 0;
+  if (isRefresh && el._lastHtml === html) return;      // tidak ada perubahan → tidak perlu render ulang
+  const sy = window.scrollY;
+  el.classList.toggle('no-anim', isRefresh);           // animasi hanya saat pindah tab, bukan saat data update
   el.innerHTML = html;
+  el._lastHtml = html;
+  window._lastRenderedTab = state.activeTab;
   refreshIcons();
+  if (isRefresh) window.scrollTo(0, sy);               // jaga posisi scroll
 }
 
 /* =========================================================================
