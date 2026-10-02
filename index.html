@@ -91,7 +91,17 @@
   select.field-input option { background-color: #ffffff; color: #111827; }
   
   .row-hover:hover { background: #F3F4F6 !important; }
-  
+  .divisi-grid { display:grid; grid-template-columns:minmax(0,1fr); gap:.5rem; }
+.divisi-grid .ph { display:none; }
+@media (min-width:640px){
+  .divisi-grid {
+    grid-template-columns:repeat(3,minmax(0,1fr));
+    grid-template-rows:repeat(var(--rows),auto);
+    grid-auto-flow:column;
+    column-gap:.75rem;
+  }
+  .divisi-grid .ph { display:block; }
+}
   .stat-card { border-radius:1rem; padding:1.25rem; color:#ffffff; box-shadow:0 10px 24px -10px rgba(0,0,0,.15); transition:all .3s; }
   .stat-card:hover { transform:translateY(-4px); box-shadow:0 16px 28px -10px rgba(0,0,0,.2); }
 
@@ -294,15 +304,67 @@ window.submitAbsensi = async function(e, id) {
   return false;
 };
 
+// 0 = Direktur Utama, 1 = Direktur, 2 = Manajer, 3 = Asisten Manajer, 4 = lainnya
+window.jabatanRank = function(u) {
+  const j = String((u && u.jabatan) || '').toLowerCase();
+  if (/direktur utama/.test(j) || (u && u.divisi === 'Direktur Utama')) return 0;
+  if (/^direktur/.test(j)) return 1;
+  if (/^asisten manajer/.test(j)) return 3;
+  if (/^manajer/.test(j)) return 2;
+  return 4;
+};
+
+// Urut: jabatan tertinggi, lalu urutan divisi; tamu luar di paling bawah
+window.sortAbsensi = function(names) {
+  const ord = (typeof DIVISI_ORDER !== 'undefined') ? DIVISI_ORDER : DIVISIONS;
+  const keyed = (names || []).map((n, i) => {
+    const u = USERS.find(x => x.name === n);
+    const d = u ? ord.indexOf(u.divisi) : -1;
+    return { n, i, known: !!u, r: u ? jabatanRank(u) : 99, d: d < 0 ? 99 : d };
+  });
+  keyed.sort((a, b) => (a.known === b.known ? 0 : a.known ? -1 : 1) || a.r - b.r || a.d - b.d || a.i - b.i);
+  return keyed.map(k => k.n);
+};
+
+// Daftar user yang boleh dipilih lewat "Pilih Semua"
+window.getAbsensiPool = function(scheduleId) {
+  const s = schedules.find(x => x.id === scheduleId);
+  let pool = USERS.filter(u => DIVISIONS.includes(u.divisi) || (!isLiteAdmin() && jabatanRank(u) === 0));
+  if (isLiteAdmin()) {
+    const allowed = new Set([...(getScopeDivisi() || []), ...((s && s.divisi) || [])]);
+    pool = pool.filter(u => allowed.has(u.divisi));
+  }
+  return pool;
+};
+
+window.toggleSelectAllAbsensi = function(cb) {
+  const pool = getAbsensiPool(cb.dataset.sid);
+  if (cb.checked) {
+    pool.forEach(u => { if (!window.tempAbsensi.includes(u.name)) window.tempAbsensi.push(u.name); });
+  } else {
+    const names = new Set(pool.map(u => u.name));
+    window.tempAbsensi = window.tempAbsensi.filter(n => !names.has(n));
+  }
+  renderAbsensiList();
+};
+
 window.renderAbsensiList = function() {
+  window.tempAbsensi = sortAbsensi(window.tempAbsensi);
+  // sinkronkan status checkbox "Pilih Semua"
+  const allCb = document.getElementById('absensi-select-all');
+  if (allCb) {
+    const pool = getAbsensiPool(allCb.dataset.sid);
+    allCb.checked = pool.length > 0 && pool.every(u => window.tempAbsensi.includes(u.name));
+  }
+
   const container = document.getElementById('absensi-list');
-  if(!container) return;
-  
-  if(window.tempAbsensi.length === 0) {
+  if (!container) return;
+
+  if (window.tempAbsensi.length === 0) {
     container.innerHTML = '<p class="text-sm text-gray-400 italic w-full text-center py-6">Belum ada peserta yang diabsen.</p>';
     return;
   }
-  
+
   container.innerHTML = window.tempAbsensi.map(name => `
     <div class="flex items-center gap-2 bg-white border border-emerald-200 text-emerald-700 px-3 py-1.5 rounded-lg shadow-sm text-sm font-bold">
       ${name}
@@ -520,7 +582,8 @@ onValue(tasksQuery, (snapshot) => {
   window.tasks = [];
   const data = snapshot.val();
   if (data) {
-    const todayNum = new Date().getTime();
+    const d0 = new Date(); d0.setHours(0,0,0,0);
+    const todayNum = d0.getTime();
     Object.keys(data).forEach((key) => {
       let t = data[key];
       t.divisi = t.divisi || [];
@@ -529,14 +592,16 @@ onValue(tasksQuery, (snapshot) => {
       // Tugas hanya akan terarsip jika sudah disetujui admin (bukan waiting approval)
       // dan terarsip H+3 dihitung dari tanggal DEADLINE.
       if (t.done && t.reviewStatus !== 'waiting') {
-        const deadlineNum = new Date(t.deadline + 'T00:00:00').getTime();
-        const diffDays = Math.round((todayNum - deadlineNum) / 86400000);
-        if (diffDays >= 3) {
-          t.isArchived = true;
-          set(ref(rtdb, "gaspol_tasks/" + t.id), t);
-          return; 
-        }
-      }
+  // patokan: tanggal disetujui admin (atau tanggal selesai untuk tugas lama)
+  const refStr = t.approvedDate || t.doneDate || t.deadline;
+  const refNum = new Date(refStr + 'T00:00:00').getTime();
+  const diffDays = Math.round((todayNum - refNum) / 86400000);
+  if (diffDays >= 2) {           // H dan H+1 tampil, H+2 masuk arsip
+    t.isArchived = true;
+    set(ref(rtdb, "gaspol_tasks/" + t.id), t);
+    return;
+  }
+}
       window.tasks.push(t);
     });
   }
@@ -554,7 +619,8 @@ window.applyScopeFilter();
     window.schedules = [];
     const data = snapshot.val();
     if (data) {
-      const todayNum = new Date().getTime();
+      const d0 = new Date(); d0.setHours(0,0,0,0);
+const todayNum = d0.getTime();
       Object.keys(data).forEach((key) => {
         let s = data[key];
         
@@ -626,7 +692,7 @@ window.applyScopeFilter();
     if (typeof mountApp === 'function') {
       mountApp();
     }
-    if (window.handleUmandLink) window.handleUmandLink();
+    if (window.handleUmanLink) window.handleUmanLink();
   });
 </script>
 
@@ -766,7 +832,12 @@ const REGISTER_JOBS = [
 ];
 
 const HIERARCHY = { "Direktorat SDMPP": [ "SDM", "Diklat" ], "Direktorat PKLO": [ "Keuangan", "GA", "IT", "Operasional & Marketing" ], "Direktorat Yanmed": [ "Keperawatan", "Medis", "Penunjang Medis" ] };
-
+const DIVISI_COLUMNS = [
+  ["Direktorat SDMPP", "SDM", "Diklat"],
+  ["Direktorat PKLO", "Keuangan", "GA", "Operasional & Marketing", "IT"],
+  ["Direktorat Yanmed", "Medis", "Penunjang Medis", "Keperawatan"]
+];
+const DIVISI_ORDER = DIVISI_COLUMNS.flat();
 
 
 // Variabel akan diisi otomatis oleh onSnapshot Firebase dari Langkah 2
@@ -946,6 +1017,17 @@ window.inMyScope = list => (window.isDirut(window.state.currentUser) || window.s
   ? true
   : (list || []).some(d => window.getViewDivisi().includes(d));
 window.scopedTasks = () => (state.currentUser.role === 'admin' || window.isDirut(state.currentUser)) ? tasks : tasks.filter(t => inMyScope(t.divisi));
+window.isAsmen = cu => /^asisten manajer/i.test(((cu || {}).jabatan) || '');
+
+// Cocokkan nama tanpa gelar (aman jika gelar diubah di Edit Profil)
+window.iAmIn = list => {
+  const me = parseName(state.currentUser.name).name.toLowerCase();
+  return (list || []).some(n => parseName(n).name.toLowerCase() === me);
+};
+
+// Khusus Home: asmen hanya melihat yang ada namanya
+window.homeTasks = () => scopedTasks().filter(t => !isAsmen(state.currentUser) || iAmIn(t.pic));
+window.homeSchedules = () => schedules.filter(s => inMyScope(s.divisi) && (!isAsmen(state.currentUser) || iAmIn(s.users)));
 /* ===== HAK AKSES AGENDA (berbasis pembuat) ===== */
 window.isFullAdmin = function() {
   const cu = window.state && window.state.currentUser;
@@ -1080,7 +1162,9 @@ window.renderPesertaCheckboxes = function() {
   }
   container.className = 'grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-52 overflow-y-auto pr-1';
   let html = '';
-  Array.from(state.addScheduleDivisi).forEach(div => {
+  Array.from(state.addScheduleDivisi)
+  .sort((a, b) => DIVISI_ORDER.indexOf(a) - DIVISI_ORDER.indexOf(b))
+  .forEach(div => {
     const divUsers = USERS.filter(u => u.divisi === div);
     if(divUsers.length > 0) {
       html += `<div class="col-span-full mt-2 first:mt-0"><span class="text-[10px] font-bold text-evergreen-dark uppercase tracking-wider bg-evergreen-light/40 px-2 py-1 rounded-md">${div}</span></div>`;
@@ -1131,21 +1215,23 @@ window.stopLiveNotulensi = function() {
 /* ===== LABEL PENULIS PER PARAGRAF ===== */
 window._newBid = () => 'b' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
 
-window.prepareNotulensiEditor = function(editor) {
+window.prepareNotulensiEditor = function(editor, stamp) {
   try { document.execCommand('defaultParagraphSeparator', false, 'div'); } catch (e) {}
+  const cu = state.currentUser;
+  // stamp=true: blok baru diberi nama penulis. stamp=false: konten lama (penulis tidak diketahui)
+  const mark = d => {
+    if (stamp && cu) { d.dataset.bid = _newBid(); d.dataset.by = cu.name; }
+    else d.dataset.bid = 'legacy-' + Math.random().toString(36).slice(2, 8);
+  };
   let cur = null;
   Array.from(editor.childNodes).forEach(n => {
     if (n.nodeType === 1 && n.tagName === 'DIV') {
       cur = null;
-      if (!n.dataset.bid) n.dataset.bid = 'legacy-' + Math.random().toString(36).slice(2, 8);
+      if (!n.dataset.bid) mark(n);
       return;
     }
     if (n.nodeType === 3 && !n.textContent.trim() && !cur) { editor.removeChild(n); return; }
-    if (!cur) {
-      cur = document.createElement('div');
-      cur.dataset.bid = 'legacy-' + Math.random().toString(36).slice(2, 8);
-      editor.insertBefore(cur, n);
-    }
+    if (!cur) { cur = document.createElement('div'); mark(cur); editor.insertBefore(cur, n); }
     cur.appendChild(n);
   });
   if (!editor.firstChild) editor.innerHTML = '<div><br></div>';
@@ -1161,7 +1247,7 @@ window.stampNotulensiAuthor = function() {
     (n.nodeType === 3 && n.textContent.trim()) || (n.nodeType === 1 && n.tagName !== 'DIV'));
   if (loose) {
     const aN = sel.anchorNode, aO = sel.anchorOffset;
-    prepareNotulensiEditor(editor);
+    prepareNotulensiEditor(editor, true);
     if (aN && editor.contains(aN)) {
       const r = document.createRange(); r.setStart(aN, aO); r.collapse(true);
       sel.removeAllRanges(); sel.addRange(r);
@@ -1192,6 +1278,8 @@ window.guardForeignBlock = function(e) {
   if (!sel.rangeCount) return;
   let node = sel.anchorNode;
   if (!node || node === editor || !editor.contains(node)) return;
+  const elx = node.nodeType === 3 ? node.parentElement : node;
+if (elx && elx.closest && elx.closest('td,th')) return;   // di dalam sel tabel: jangan pindahkan kursor
   while (node.parentNode !== editor) node = node.parentNode;
   if (node.nodeType !== 1) return;
   const by = node.dataset.by;
@@ -1264,6 +1352,57 @@ window.handleNotulensiPaste = function(e) {
   tmp.querySelectorAll('table').forEach(t => t.classList.add('notulensi-table'));
   document.execCommand('insertHTML', false, tmp.innerHTML);
 };
+
+window._tblCell = function() {
+  const ed = document.getElementById('notulensi-editor'), sel = window.getSelection();
+  if (!ed || !sel.rangeCount) return null;
+  let n = sel.anchorNode; if (n && n.nodeType === 3) n = n.parentElement;
+  const cell = n && n.closest ? n.closest('td,th') : null;
+  return cell && ed.contains(cell) ? cell : null;
+};
+
+window.tableOp = function(op) {
+  const ed = document.getElementById('notulensi-editor');
+  const cell = window._tblCell();
+  if (!ed || !cell) return alert('Klik di dalam sel tabel terlebih dahulu.');
+  const table = cell.closest('table'), tr = cell.parentElement;
+  const rows = Array.from(table.rows), ci = cell.cellIndex;
+  const mk = () => { const td = document.createElement('td'); td.innerHTML = '<br>'; return td; };
+  const removeTable = () => {
+    const p = table.parentElement;
+    table.remove();
+    if (p && p !== ed && !p.textContent.trim() && !p.querySelector('br,table')) p.innerHTML = '<br>';
+  };
+
+  if (op === 'rowAbove' || op === 'rowBelow') {
+    const nr = document.createElement('tr');
+    const n = Array.from(tr.cells).reduce((a, c) => a + (c.colSpan || 1), 0);
+    for (let i = 0; i < n; i++) nr.appendChild(mk());
+    tr.parentNode.insertBefore(nr, op === 'rowAbove' ? tr : tr.nextSibling);
+  } else if (op === 'colLeft' || op === 'colRight') {
+    rows.forEach(r => {
+      const c = r.cells[ci], nc = mk();
+      if (!c) r.appendChild(nc);
+      else r.insertBefore(nc, op === 'colLeft' ? c : c.nextSibling);
+    });
+  } else if (op === 'delRow') {
+    if (rows.length <= 1) removeTable(); else tr.remove();
+  } else if (op === 'delCol') {
+    if (tr.cells.length <= 1) removeTable(); else rows.forEach(r => r.cells[ci] && r.cells[ci].remove());
+  } else if (op === 'delTable') {
+    if (!confirm('Hapus seluruh tabel ini?')) return;
+    removeTable();
+  }
+  ed.dispatchEvent(new Event('input', { bubbles: true }));   // simpan draft + sinkron live
+  const bar = document.getElementById('nt-table-tools');
+  if (bar) bar.style.display = window._tblCell() ? 'flex' : 'none';
+};
+
+// Tampilkan toolbar hanya saat kursor berada di dalam tabel
+document.addEventListener('selectionchange', () => {
+  const bar = document.getElementById('nt-table-tools');
+  if (bar) bar.style.display = window._tblCell() ? 'flex' : 'none';
+});
 
 window.initLiveNotulensi = function(scheduleId) {
   window.stopLiveNotulensi();
@@ -1407,7 +1546,7 @@ window.submitEditProfile = async function(e) {
     document.getElementById('topbar').innerHTML = renderTopBar();
   } catch (error) {
     console.error(error);
-    if (error.code === 'app/need-old-password') alert("Untuk mengganti password (atau jika diminta demi keamanan saat ganti email), isi kolom Password Lama.");
+    if (error.code === 'app/need-old-password') alert("Demi keamanan, isi kolom Password Lama dengan password Anda saat ini untuk mengganti email atau password.");
     else if (error.code === 'auth/invalid-credential' || error.code === 'auth/wrong-password') alert("Gagal: Password Lama yang Anda masukkan salah!");
     else if (error.code === 'auth/email-already-in-use') alert("Gagal: Email baru tersebut sudah digunakan.");
     else if (error.code === 'auth/operation-not-allowed') alert("Firebase menolak ganti email langsung (fitur Email Enumeration Protection aktif di proyek Firebase Anda). Nama dan gelar tetap bisa diganti tanpa mengubah email.");
@@ -1586,7 +1725,7 @@ if (type === 'editProfile') {
 
         <!-- TANDA TANGAN -->
         <div class="mb-4 p-4 bg-gray-50 border border-gray-200 rounded-xl">
-          <span class="block text-sm font-medium text-gray-600 mb-2">Tanda Tangan (dipakai otomatis di Umand &amp; Absensi)</span>
+          <span class="block text-sm font-medium text-gray-600 mb-2">Tanda Tangan (dipakai otomatis di Uman &amp; Absensi)</span>
           <div class="flex items-center gap-4">
             <div class="w-40 h-20 bg-white border border-dashed border-gray-300 rounded-lg flex items-center justify-center overflow-hidden shrink-0">
               <img id="ep-ttd-preview" src="${state.currentUser.ttd || ''}" class="max-w-full max-h-full object-contain ${state.currentUser.ttd ? '' : 'hidden'}" />
@@ -1721,6 +1860,16 @@ notulensiHtml = `
   <button type="button" onclick="insertNotulensiTable()" class="px-3 py-1.5 rounded-lg bg-gray-900 text-white font-bold hover:bg-black flex items-center gap-1.5">${icon('table','w-3.5 h-3.5')} Sisipkan Tabel</button>
   <span class="text-[10px] text-gray-400 italic hidden md:inline">atau Ctrl+V tabel dari Excel/Word</span>
 </div>
+<div id="nt-table-tools" style="display:none" class="flex-wrap items-center gap-1.5 mb-2 shrink-0 text-xs bg-blue-50 border border-blue-100 rounded-xl px-3 py-2">
+  <span class="font-bold text-blue-700 uppercase tracking-wider mr-1">Edit tabel:</span>
+  <button type="button" onmousedown="event.preventDefault()" onclick="tableOp('rowAbove')" class="px-2.5 py-1 rounded-lg bg-white border border-blue-200 text-blue-700 font-bold hover:bg-blue-100">+ Baris Atas</button>
+  <button type="button" onmousedown="event.preventDefault()" onclick="tableOp('rowBelow')" class="px-2.5 py-1 rounded-lg bg-white border border-blue-200 text-blue-700 font-bold hover:bg-blue-100">+ Baris Bawah</button>
+  <button type="button" onmousedown="event.preventDefault()" onclick="tableOp('colLeft')" class="px-2.5 py-1 rounded-lg bg-white border border-blue-200 text-blue-700 font-bold hover:bg-blue-100">+ Kolom Kiri</button>
+  <button type="button" onmousedown="event.preventDefault()" onclick="tableOp('colRight')" class="px-2.5 py-1 rounded-lg bg-white border border-blue-200 text-blue-700 font-bold hover:bg-blue-100">+ Kolom Kanan</button>
+  <button type="button" onmousedown="event.preventDefault()" onclick="tableOp('delRow')" class="px-2.5 py-1 rounded-lg bg-white border border-gray-300 text-gray-600 font-bold hover:bg-gray-100">− Baris</button>
+  <button type="button" onmousedown="event.preventDefault()" onclick="tableOp('delCol')" class="px-2.5 py-1 rounded-lg bg-white border border-gray-300 text-gray-600 font-bold hover:bg-gray-100">− Kolom</button>
+  <button type="button" onmousedown="event.preventDefault()" onclick="tableOp('delTable')" class="px-2.5 py-1 rounded-lg bg-rose-500 text-white font-bold hover:bg-rose-600">Hapus Tabel</button>
+</div>
               <div id="notulensi-editor" contenteditable="true" 
               onclick="handleEditorBlankClick(event)"
               onkeydown="handleNotulensiKey(event)"
@@ -1772,7 +1921,13 @@ notulensiHtml = `
           <div id="absensi-search-results" class="absolute z-10 w-full bg-white border border-gray-200 rounded-xl shadow-lg mt-1 hidden max-h-48 overflow-y-auto"></div>
         </div>
         <div class="flex-1 min-h-[250px] border border-gray-100 bg-gray-50 rounded-xl p-4 overflow-y-auto mt-4">
-          <h4 class="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-3">Daftar Hadir Draft</h4>
+          <div class="flex items-center justify-between mb-3">
+  <h4 class="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Daftar Hadir Draft</h4>
+  <label class="flex items-center gap-2 cursor-pointer bg-white px-3 py-1.5 rounded-lg border border-emerald-200 hover:bg-emerald-50 transition-all">
+    <input type="checkbox" id="absensi-select-all" data-sid="${s.id}" onchange="toggleSelectAllAbsensi(this)" class="w-4 h-4 rounded border-gray-300" />
+    <span class="text-xs font-bold text-emerald-700">Pilih Semua</span>
+  </label>
+</div>
           <div id="absensi-list" class="flex flex-wrap gap-2"></div>
         </div>
       </div>
@@ -1829,11 +1984,11 @@ notulensiHtml = `
   if(type === 'statDetail') {
     const mode = payload; wide = true;
     let filteredTasks = [];
-        if(mode === 'total') { title = "Total Seluruh Tugas"; filteredTasks = scopedTasks(); }
-    if(mode === 'done') { title = "Daftar Tugas Selesai"; filteredTasks = scopedTasks().filter(t=>t.done); }
-    if(mode === 'progress') { title = "Daftar Tugas Belum Selesai"; filteredTasks = scopedTasks().filter(t=>!t.done); }
-    if(mode === 'overdue') { title = "Daftar Tugas Lewat Deadline"; filteredTasks = scopedTasks().filter(t=> !t.done && daysDiff(t.deadline) < 0); }
-    if(mode === 'pendingExt') { title = "Menunggu Persetujuan Ekstensi"; filteredTasks = scopedTasks().filter(t=> t.extensions && t.extensions.some(ex => ex.status === 'pending')); }
+        if(mode === 'total') { title = "Total Seluruh Tugas"; filteredTasks = homeTasks(); }
+    if(mode === 'done') { title = "Daftar Tugas Selesai"; filteredTasks = homeTasks().filter(t=>t.done); }
+    if(mode === 'progress') { title = "Daftar Tugas Belum Selesai"; filteredTasks = homeTasks().filter(t=>!t.done); }
+    if(mode === 'overdue') { title = "Daftar Tugas Lewat Deadline"; filteredTasks = homeTasks().filter(t=> !t.done && daysDiff(t.deadline) < 0); }
+    if(mode === 'pendingExt') { title = "Menunggu Persetujuan Ekstensi"; filteredTasks = homeTasks().filter(t=> t.extensions && t.extensions.some(ex => ex.status === 'pending')); }
     
     body = `
       <div class="max-h-[60vh] overflow-y-auto pr-2 space-y-2">
@@ -2537,15 +2692,23 @@ if (type === 'alert') {
             </label>
           </div>
           ${isLiteAdmin() ? `<span class="block text-[10px] text-amber-600 mb-2">*Wajib memilih minimal satu divisi di bawah ${state.currentUser.scopeDirektorat}.</span>` : ''}
-          <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            ${DIVISIONS.map(d => `
-              <label class="flex items-center gap-2 p-2.5 border border-gray-200 bg-white rounded-lg cursor-pointer hover:border-evergreen hover:bg-evergreen-light/20 transition-all shadow-sm">
-                <input type="checkbox" value="${d}" onchange="handleDivisiCheck(this)" class="divisi-cb w-4 h-4 text-evergreen-dark rounded border-gray-300 focus:ring-evergreen" />
-                <span class="text-xs font-semibold text-gray-700 leading-tight">${d}</span>
-              </label>
-            `).join('')}
-          </div>
-        </div>
+          ${(() => {
+  const rows = Math.max(...DIVISI_COLUMNS.map(c => c.length));
+  let cells = '';
+  DIVISI_COLUMNS.forEach(col => {
+    for (let i = 0; i < rows; i++) {
+      const d = col[i];
+      if (!d) { cells += '<div class="ph"></div>'; continue; }
+      const head = i === 0;
+      cells += `
+        <label class="flex items-center gap-2 px-3 py-2.5 min-h-[44px] border rounded-lg cursor-pointer shadow-sm transition-all hover:border-evergreen ${head ? 'border-evergreen bg-evergreen-light/30' : 'border-gray-200 bg-white ml-3'}">
+          <input type="checkbox" value="${d}" onchange="handleDivisiCheck(this)" class="divisi-cb w-4 h-4 shrink-0 text-evergreen-dark rounded border-gray-300 focus:ring-evergreen" />
+          <span class="text-xs leading-tight ${head ? 'font-extrabold text-gray-900' : 'font-semibold text-gray-700'}">${d}</span>
+        </label>`;
+    }
+  });
+  return `<div class="divisi-grid" style="--rows:${rows}">${cells}</div>`;
+})()}
 
         <div class="block mb-5">
           <span class="block text-sm font-medium text-gray-600 mb-1.5">Peserta Wajib (Internal)</span>
@@ -3083,6 +3246,7 @@ window.approveTask = async function(id) {
   if(!t) return;
   if(!confirm('Setujui dan selesaikan tugas ini secara permanen?')) return;
   t.reviewStatus = 'approved';
+  t.approvedDate = toISO(today);
   if(!t.timeline) t.timeline = [];
   t.timeline.push({ date: toISO(today), time: new Date().toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'}), title: 'Tugas Disetujui', desc: 'Admin telah menerima dan menyetujui hasil pekerjaan.' });
   
@@ -3163,8 +3327,8 @@ window.toggleNotulensiMenu = function(id) {
   renderScheduleTableOnly();
 };
 
-// Fungsi Print Umand
-window.printUmand = async function(id, opts) {
+// Fungsi Print Uman
+window.printUman = async function(id, opts) {
     const s = schedules.find(x => x.id === id) || (window._archivedSchedCache || {})[id];
   if (!s) return;
   s.divisi = s.divisi || []; s.users = s.users || []; s.dokumentasi = s.dokumentasi || []; s.hadir = s.hadir || [];
@@ -3531,24 +3695,24 @@ const HW = PW - HDR_M * 2;      // 190 mm                                   // u
   } catch (err) {
     console.error('Uman gagal:', err);
     if (win) win.close();
-    alert('Gagal membuat PDF Umand: ' + err.message);
+    alert('Gagal membuat PDF Uman: ' + err.message);
   }
 };
 
-window.handleUmandLink = async function() {
-  const id = new URLSearchParams(location.search).get('umand');
-  if (!id || window._umandHandled || !window.state.currentUser) return;
-  window._umandHandled = true;
+window.handleUmanLink = async function() {
+  const id = new URLSearchParams(location.search).get('uman');
+  if (!id || window._umanHandled || !window.state.currentUser) return;
+  window._umanHandled = true;
   for (let i = 0; i < 40 && !(window.USERS || []).length; i++) await new Promise(r => setTimeout(r, 250)); // tunggu data user
   try {
     const snap = await window.get(window.child(window.ref(window.rtdb), 'gaspol_schedules/' + id));
-    if (!snap.exists()) return alert('Dokumen Umand tidak ditemukan.');
+    if (!snap.exists()) return alert('Dokumen Uman tidak ditemukan.');
     const s = snap.val();
     s.divisi = s.divisi || []; s.users = s.users || []; s.dokumentasi = s.dokumentasi || []; s.hadir = s.hadir || [];
     window._archivedSchedCache = window._archivedSchedCache || {};
     window._archivedSchedCache[id] = s;
-    await window.printUmand(id, { sameTab: true });
-  } catch (e) { console.error(e); alert('Gagal membuka Umand.'); }
+    await window.printUman(id, { sameTab: true });
+  } catch (e) { console.error(e); alert('Gagal membuka Uman.'); }
 };
 
 /* =========================================================================
@@ -4448,14 +4612,14 @@ function donutChartHtml(pieData){
     return seg;
   }).join(', ');
   return `
-  <div class="flex items-center justify-center py-2">
-    <div class="relative w-48 h-48 rounded-full shadow-inner" style="background: conic-gradient(${segments || '#e5e7eb 0% 100%'});">
-      <div class="absolute inset-0 m-auto w-32 h-32 rounded-full bg-white flex items-center justify-center flex-col shadow-sm">
-        <span class="text-3xl font-extrabold text-gray-800">${pieData.reduce((s,x)=>s+x.value,0)}</span>
-        <span class="text-xs font-semibold text-gray-400 uppercase tracking-widest mt-1">Total</span>
-      </div>
+  <div class="flex items-center justify-center py-1">
+  <div class="relative w-40 h-40 rounded-full shadow-inner" style="background: conic-gradient(${segments || '#e5e7eb 0% 100%'});">
+    <div class="absolute inset-0 m-auto w-28 h-28 rounded-full bg-white flex items-center justify-center flex-col shadow-sm">
+      <span class="text-3xl font-extrabold text-gray-800">${pieData.reduce((s,x)=>s+x.value,0)}</span>
+      <span class="text-xs font-semibold text-gray-400 uppercase tracking-widest mt-1">Total</span>
     </div>
-  </div>`;
+  </div>
+</div>`;
 }
 
 window.selectAdminDate = function(iso) { 
@@ -4617,9 +4781,9 @@ function miniCalendarHtml(eventMap, activeDate){
   <div class="flex items-center justify-between mb-3">
     <p class="text-sm font-semibold text-gray-700 capitalize">${monthLabel}</p>
     <!-- Tombol Reset / Refresh Tampilan Tanggal -->
-    <button onclick="resetUserDate()" class="text-gray-400 hover:text-evergreen-dark hover:bg-evergreen-light/30 transition-all p-1.5 rounded-lg" title="Tampilkan Semua Tanggal">
-      ${icon('rotate-ccw', 'w-4 h-4')}
-    </button>
+    <button onclick="resetUserDate()" class="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-bold transition-all active:scale-95 ${activeDate ? 'bg-evergreen text-gray-900 shadow-md hover:bg-evergreen-hover' : 'bg-gray-200 text-gray-500 hover:bg-gray-300'}" title="Tampilkan semua tanggal">
+  ${icon('rotate-ccw', 'w-3.5 h-3.5')} Reset
+</button>
   </div>
   <div class="grid grid-cols-7 gap-1 text-center text-xs text-gray-400 mb-1">${dayNames.map(d=>`<div>${d}</div>`).join('')}</div>
   <div class="grid grid-cols-7 gap-1">
@@ -4700,7 +4864,7 @@ window.updateUserDashboardPartial = function() {
 
 function userTasksHtml() {
   const cu = state.currentUser;
-  let myTasks = scopedTasks().sort((a,b)=> a.deadline<b.deadline?-1:1);
+  let myTasks = homeTasks().sort((a,b)=> a.deadline<b.deadline?-1:1);
   if (state.selectedDate) myTasks = myTasks.filter(t => t.deadline === state.selectedDate);
   const titleText = state.selectedDate ? `Tugas Masuk: ${fmtDateShort(state.selectedDate)}` : "Tugas Masuk";
 
@@ -4717,8 +4881,8 @@ function userTasksHtml() {
 
 function userMeetingsHtml() {
   const cu = state.currentUser;
-  let myMeetings = schedules.filter(s=>inMyScope(s.divisi) && s.status !== 'Hold').sort((a,b)=> a.tanggal<b.tanggal?-1:1);
-  const holdMeetings = schedules.filter(s=>inMyScope(s.divisi) && s.status === 'Hold');
+  let myMeetings = homeSchedules().filter(s => s.status !== 'Hold').sort((a,b)=> a.tanggal<b.tanggal?-1:1);
+const holdMeetings = homeSchedules().filter(s => s.status === 'Hold');
   
   if (state.selectedDate) myMeetings = myMeetings.filter(s => s.tanggal === state.selectedDate);
   const titleText = state.selectedDate ? `Meeting Bersama Direktur Utama: ${fmtDateShort(state.selectedDate)}` : "Meeting Bersama Direktur Utama";
@@ -4817,7 +4981,7 @@ const pendingExtTasks = tasks.filter(t => t.extensions && t.extensions.some(ex =
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
 <!-- 1. Daftar Tugas per Divisi & PIC -->
-        <div class="bg-gray-50 rounded-2xl border border-gray-200 p-5 flex flex-col h-[400px]">
+        <div class="bg-gray-50 rounded-2xl border border-gray-200 p-5 flex flex-col h-[460px]">
           <h3 class="font-semibold text-gray-800 mb-4 shrink-0">Daftar Tugas per Divisi & PIC</h3>
           <div class="overflow-y-auto pr-2 space-y-3 flex-1 custom-scrollbar-light"> <!-- Pastikan ada overflow-y-auto -->
             
@@ -4832,9 +4996,9 @@ const pendingExtTasks = tasks.filter(t => t.extensions && t.extensions.some(ex =
                 if (!t.done) return true; // Tampilkan yang belum selesai
                 if (t.done && t.reviewStatus !== 'waiting') {
                   // Jika sudah selesai dan disetujui (bukan waiting)
-                  const doneDateNum = new Date(t.doneDate + 'T00:00:00').getTime();
-                  const diffDaysDone = Math.round((todayTime - doneDateNum) / 86400000);
-                  return diffDaysDone < 3; // Tampilkan jika belum lewat 3 hari sejak diselesaikan
+                  const doneDateNum = new Date((t.approvedDate || t.doneDate || t.deadline) + 'T00:00:00').getTime();
+const diffDaysDone = Math.round((todayTime - doneDateNum) / 86400000);
+return diffDaysDone < 2; // Tampilkan jika belum lewat 3 hari sejak diselesaikan
                 }
                 return false; // Jangan tampilkan yang masih waiting approval di sini, ada card khususnya
               });
@@ -4888,7 +5052,7 @@ visibleTasks.sort((a, b) => _rank(a) - _rank(b) || (a.deadline < b.deadline ? -1
         </div>
 
         <!-- 2. KARTU GABUNGAN: Tindak Lanjut Tugas (Approval & Ekstensi) -->
-        <div class="bg-slate-50 rounded-2xl border border-slate-200 p-5 flex flex-col h-[400px] shadow-sm relative overflow-hidden">
+        <div class="bg-slate-50 rounded-2xl border border-slate-200 p-5 flex flex-col h-[460px] shadow-sm relative overflow-hidden">
           
           <!-- Dekorasi Background: Pendaran Cahaya Sudut (Tanpa Titik-titik) -->
           <div class="absolute top-0 right-0 w-[250px] h-[250px] bg-blue-100/60 rounded-full blur-3xl pointer-events-none -translate-y-1/2 translate-x-1/3"></div>
@@ -4940,15 +5104,19 @@ visibleTasks.sort((a, b) => _rank(a) - _rank(b) || (a.deadline < b.deadline ? -1
         </div>
 
         <!-- 3. Progres Tugas (Donut Chart - Lebih Lebar) -->
-        <div class="bg-gray-50 rounded-2xl border border-gray-200 p-5 flex flex-col items-center justify-center h-[400px]">
-          <h3 class="font-semibold text-gray-800 w-full text-left mb-2">Progres Tugas</h3>
-          <div class="flex-1 flex flex-col items-center justify-center w-full">
-            ${donutChartHtml(pieData)}
-          </div>
-          <div class="grid grid-cols-2 gap-3 w-full shrink-0">
-            ${pieData.map(d => `<div class="flex items-center gap-2 text-[11px] font-medium text-gray-600 bg-white px-3 py-2 rounded-lg border border-gray-100 shadow-sm"><span class="w-2.5 h-2.5 rounded-full shrink-0 ${TASK_STATUS_STYLE[d.name].dot}"></span><span class="truncate">${d.name} (${d.value})</span></div>`).join('')}
-          </div>
-        </div>
+        <div class="bg-gray-50 rounded-2xl border border-gray-200 p-5 flex flex-col h-[460px]">
+  <h3 class="font-semibold text-gray-800 mb-2 shrink-0">Progres Tugas</h3>
+  <div class="flex-1 flex items-center justify-center min-h-0">
+    ${donutChartHtml(pieData)}
+  </div>
+  <div class="grid grid-cols-2 gap-2 w-full shrink-0 mt-3">
+    ${pieData.map((d, i) => `
+      <div class="flex items-center gap-2 text-[11px] font-medium text-gray-600 bg-white px-3 py-2 rounded-lg border border-gray-100 shadow-sm ${i === pieData.length - 1 && pieData.length % 2 === 1 ? 'col-span-2 justify-center' : ''}">
+        <span class="w-2.5 h-2.5 rounded-full shrink-0 ${TASK_STATUS_STYLE[d.name].dot}"></span>
+        <span class="truncate">${d.name} (${d.value})</span>
+      </div>`).join('')}
+  </div>
+</div>
 
       </div>
 
@@ -5034,7 +5202,7 @@ visibleTasks.sort((a, b) => _rank(a) - _rank(b) || (a.deadline < b.deadline ? -1
 
 function userRevisedTasksHtml() {
   const cu = state.currentUser;
-  const revTasks = scopedTasks().filter(t => t.reviewStatus === 'revised' && !t.done);
+  const revTasks = homeTasks().filter(t => t.reviewStatus === 'revised' && !t.done);
   
   let content = '';
   if(revTasks.length === 0) {
@@ -5068,7 +5236,7 @@ function userRevisedTasksHtml() {
 
 function userWaitingApprovalHtml() {
   const cu = state.currentUser;
-  const waitingTasks = scopedTasks().filter(t => t.done && t.reviewStatus === 'waiting');
+  const waitingTasks = homeTasks().filter(t => t.done && t.reviewStatus === 'waiting');
 
   let content = '';
   if(waitingTasks.length === 0) {
@@ -5098,7 +5266,7 @@ function userWaitingApprovalHtml() {
 }
 
 function userSummaryHtml(){
-  const my = scopedTasks();
+  const my = homeTasks();
   const total = my.length;
   const done = my.filter(t => t.done).length;
   const notDone = total - done;
@@ -5124,13 +5292,17 @@ function userSummaryHtml(){
     <div class="stat-card bg-pink-500 cursor-pointer hover:scale-[1.02] transition-transform" onclick="openModal('statDetail', 'overdue')">
       <div class="flex items-center justify-between"><div><p class="text-sm opacity-90 text-white">Lewat Deadline</p><p class="text-3xl font-bold mt-1 text-white">${overdue}</p></div><div class="p-2.5 bg-white/20 rounded-xl">${icon('alert-triangle','w-5 h-5 text-white')}</div></div>
     </div>
+    ${isAsmen(state.currentUser) ? `
+<p class="text-xs text-gray-500 mb-6 -mt-2 flex items-center gap-1.5">
+  ${icon('info', 'w-3.5 h-3.5')} Home hanya menampilkan tugas dan agenda yang mencantumkan nama Anda. Lihat seluruh data divisi di tab Task dan Schedule.
+</p>` : ''}
   </div>`;
 }
 
 function renderHomeUser(){
   const cu = state.currentUser;
-  const myTasksAll = scopedTasks();
-  const myMeetingsAll = schedules.filter(s=>inMyScope(s.divisi));
+  const myTasksAll = homeTasks();
+const myMeetingsAll = homeSchedules();
   
   const eventMap = {};
   myTasksAll.forEach(t => { 
@@ -5219,7 +5391,7 @@ window.resetScheduleFilters = function(){ state.scheduleFilters = {start:'',end:
 
 function getFilteredSchedules(scopeDivisi){
   const f = state.scheduleFilters; let list = schedules;
-  if(scopeDivisi) list = list.filter(s => inMyScope(s.divisi));
+  if(scopeDivisi) list = list.filter(s => inMyScope(s.divisi) && (!isAsmen(state.currentUser) || iAmIn(s.users)));
   return list.filter(s => {
     if(f.start && s.tanggal < f.start) return false;
     if(f.end && s.tanggal > f.end) return false;
@@ -5238,7 +5410,7 @@ window.exportSchedulePDF = function() {
   const base = window.location.origin + window.location.pathname;
   const list = getFilteredSchedules(state.currentUser.role==='admin'?null:state.currentUser.divisi);
   const data = list.map(s => [
-    fmtDate(s.tanggal), s.nama, s.status, s.divisi.join(', '), s.users.join(', '), 'Buka Umand'
+    fmtDate(s.tanggal), s.nama, s.status, s.divisi.join(', '), s.users.join(', '), 'Buka Uman'
   ]);
   doc.autoTable({
     head: [['Tanggal', 'Judul Agenda', 'Status', 'Divisi', 'Peserta', 'Notulensi']],
@@ -5248,7 +5420,7 @@ window.exportSchedulePDF = function() {
     },
     didDrawCell: d => {
       if (d.section === 'body' && d.column.index === 5) {
-        doc.link(d.cell.x, d.cell.y, d.cell.width, d.cell.height, { url: base + '?umand=' + list[d.row.index].id });
+        doc.link(d.cell.x, d.cell.y, d.cell.width, d.cell.height, { url: base + '?uman=' + list[d.row.index].id });
       }
     }
   });
@@ -5393,9 +5565,9 @@ function renderScheduleCards(filtered, isAdmin) {
           </button>
 
         
-          <!-- TOMBOL UMAND -->
-          <button onclick='event.stopPropagation(); printUmand("${s.id}")' class="px-5 py-2.5 rounded-xl bg-gray-900 text-white hover:bg-black text-sm font-bold transition-all flex items-center justify-center gap-2 shadow-sm active:scale-95 w-full sm:w-auto">
-            ${icon('printer', 'w-4 h-4')} <span class="hidden lg:inline">Umand</span>
+          <!-- TOMBOL UMAN -->
+          <button onclick='event.stopPropagation(); printUman("${s.id}")' class="px-5 py-2.5 rounded-xl bg-gray-900 text-white hover:bg-black text-sm font-bold transition-all flex items-center justify-center gap-2 shadow-sm active:scale-95 w-full sm:w-auto">
+            ${icon('printer', 'w-4 h-4')} <span class="hidden lg:inline">Uman</span>
           </button>
           
         </div>
@@ -6637,6 +6809,7 @@ window.fetchArchivedData = async function() {
 
         // Filter hak akses divisi jika bukan admin
         if (!isAdmin && !s.divisi.includes(cu.divisi)) return;
+        if (isAsmen(cu) && !iAmIn(s.users)) return;
         // Filter pilihan dropdown divisi (jika admin memilih divisi tertentu)
         const sc = getScopeDivisi();
 if (sc && !(s.divisi || []).some(d => sc.includes(d))) return;
@@ -6666,8 +6839,8 @@ if (sc && !(s.divisi || []).some(d => sc.includes(d))) return;
             <p class="text-xs text-gray-500 mt-1">${fmtDate(s.tanggal)} • ${s.waktu} • Divisi: ${s.divisi.join(', ')}</p>
           </div>
           <div class="flex items-center gap-2">
-            <button onclick='printUmand("${s.id}")' class="px-5 py-2.5 rounded-xl bg-gray-900 text-white hover:bg-black text-sm font-bold transition-all flex items-center justify-center gap-2 shadow-sm active:scale-95">
-            ${icon('printer', 'w-4 h-4')} Umand
+            <button onclick='printUman("${s.id}")' class="px-5 py-2.5 rounded-xl bg-gray-900 text-white hover:bg-black text-sm font-bold transition-all flex items-center justify-center gap-2 shadow-sm active:scale-95">
+            ${icon('printer', 'w-4 h-4')} Uman
             </button>
           </div>
         </div>
