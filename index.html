@@ -796,8 +796,14 @@ function esc(s) {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;'); 
 }
-
-const DIVISIONS = [ "Direktorat SDMPP", "SDM", "Diklat", "Direktorat PKLO", "Keuangan", "GA", "IT", "Operasional & Marketing", "Direktorat Yanmed", "Keperawatan", "Medis", "Penunjang Medis" ];
+// Hanya izinkan link http/https agar aman dari javascript: dsb.
+window.safeLink = u => /^https?:\/\//i.test(String(u || '').trim()) ? esc(String(u).trim()) : '';
+// All Leader = ketiga direktorat terpilih dan hampir semua divisi ikut (tahan terhadap penambahan divisi baru)
+window.isAllLeader = s => {
+  const d = (s && s.divisi) || [];
+  return Object.keys(HIERARCHY).every(dir => d.includes(dir)) && d.length >= 12;
+};
+const DIVISIONS = [ "Direktorat SDMPP", "SDM", "Diklat", "Penelitian", "Direktorat PKLO", "Keuangan", "GA", "IT", "Operasional & Marketing", "Direktorat Yanmed", "Keperawatan", "Medis", "Penunjang Medis", "Mutu"];
 
 const REGISTER_JOBS = [
   { jabatan: "Master Admin", divisi: "Administrasi", role: "admin" },
@@ -806,7 +812,7 @@ const REGISTER_JOBS = [
   { jabatan: "Sekretaris Direktur Perencanaan Keuangan dan Layanan Operasional", divisi: "Sekretariat Direktorat PKLO", role: "admin", scopeDirektorat: "Direktorat PKLO" },
   { jabatan: "Sekretaris Direktur Pelayanan Medik", divisi: "Sekretariat Direktorat Yanmed", role: "admin", scopeDirektorat: "Direktorat Yanmed" },
   
-    { jabatan: "Plh.Direktur Utama", divisi: "Direktur Utama", role: "admin" },
+  { jabatan: "Plh.Direktur Utama", divisi: "Direktur Utama", role: "admin" },
   { jabatan: "Direktur SDM, Pendidikan, dan Penelitian", divisi: "Direktorat SDMPP", role: "user" },
   { jabatan: "Direktur Keuangan, Perencanaan, dan Layanan Operasional", divisi: "Direktorat PKLO", role: "user" },
   { jabatan: "Direktur Pelayanan Medik", divisi: "Direktorat Yanmed", role: "user" },
@@ -825,17 +831,19 @@ const REGISTER_JOBS = [
 
   { jabatan: "Manajer SDM", divisi: "SDM", role: "user" },
   { jabatan: "Manajer Pendidikan dan Pelatihan", divisi: "Diklat", role: "user" },
+  { jabatan: "Manajer Penelitian", divisi: "Penelitian", role: "user" },
 
   { jabatan: "Manajer Penunjang Medis", divisi: "Penunjang Medis", role: "user" },
   { jabatan: "Manajer Medis", divisi: "Medis", role: "user" },
-  { jabatan: "Manajer Keperawatan", divisi: "Keperawatan", role: "user" }
+  { jabatan: "Manajer Keperawatan", divisi: "Keperawatan", role: "user" },
+  { jabatan: "Manajer Mutu", divisi: "Mutu", role: "user" }
 ];
 
 const HIERARCHY = { "Direktorat SDMPP": [ "SDM", "Diklat" ], "Direktorat PKLO": [ "Keuangan", "GA", "IT", "Operasional & Marketing" ], "Direktorat Yanmed": [ "Keperawatan", "Medis", "Penunjang Medis" ] };
 const DIVISI_COLUMNS = [
-  ["Direktorat SDMPP", "SDM", "Diklat"],
+  ["Direktorat SDMPP", "SDM", "Diklat", "Penelitian"],
   ["Direktorat PKLO", "Keuangan", "GA", "Operasional & Marketing", "IT"],
-  ["Direktorat Yanmed", "Medis", "Penunjang Medis", "Keperawatan"]
+  ["Direktorat Yanmed", "Medis", "Penunjang Medis", "Keperawatan", "Mutu"]
 ];
 const DIVISI_ORDER = DIVISI_COLUMNS.flat();
 
@@ -1443,7 +1451,7 @@ window.initLiveNotulensi = function(scheduleId) {
     const now = Date.now();
     if (now - lastTyping > 1500) { lastTyping = now; window.set(typingRef, { uid: cu.id, name: cu.name, time: now }); }
     clearTimeout(pushTimer);
-    pushTimer = setTimeout(() => window.set(htmlRef, editor.innerHTML), 300);
+    pushTimer = setTimeout(() => window.set(htmlRef, editor.innerHTML), 1000);
   };
 
   window._liveUnsubs.push(unsubHtml, unsubTyping, () => { clearTimeout(pushTimer); clearTimeout(hideTimer); });
@@ -2470,6 +2478,7 @@ if(type === 'reviewTask') {
       <div class="space-y-3 text-sm">
         <div class="flex items-center gap-2 text-gray-600">${icon('calendar-clock','w-4 h-4 text-evergreen-dark')} ${fmtDate(s.tanggal)} • ${s.waktu}</div>
         <div class="flex items-center gap-2 text-gray-600">${icon('map-pin','w-4 h-4 text-evergreen-dark')} ${s.lokasi || '-'}</div>
+        ${safeLink(s.zoomLink) ? `<div class="flex items-center gap-2 text-blue-600">${icon('video','w-4 h-4')} <a href="${safeLink(s.zoomLink)}" target="_blank" rel="noopener" class="hover:underline font-bold">Buka Link Zoom</a></div>` : ''}
        <div class="flex items-center gap-2 text-gray-500 text-xs">${icon('user-check','w-4 h-4 text-evergreen-dark')} Dibuat oleh: <b class="text-gray-700">${esc(s.createdByName || (getScheduleCreator(s) || {}).name || 'Sekretaris Direksi')}</b></div>
         ${s.refLink ? `<div class="flex items-center gap-2 text-blue-600">${icon('link','w-4 h-4')} <a href="${s.refLink}" target="_blank" class="hover:underline font-bold">Buka Link Referensi / Materi</a></div>` : ''}
         
@@ -2675,14 +2684,18 @@ if (type === 'alert') {
           </label>
         </div>
 
-       <label class="block mb-5"><span class="block text-sm font-medium text-gray-600 mb-1.5">Link Referensi/Materi (Opsional)</span>
-          <input id="as-link" type="url" class="field-input text-sm" placeholder="Contoh: Link GDrive, PPT, PDF materi rapat..." /></label>
-
-        <div class="block mb-5">
-          <label class="block"><span class="block text-sm font-medium text-gray-600 mb-1.5">Lokasi (Offline) / Keterangan Tempat</span>
+<div class="block mb-5">
+          <label class="block"><span class="block text-sm font-medium text-gray-600 mb-1.5">📍Lokasi (Offline) / Keterangan Tempat</span>
             <input id="as-lokasi" class="field-input" placeholder="Misal: Ruang Rapat Utama, atau Daring..." /></label>
         </div>
 
+       <label class="block mb-5"><span class="block text-sm font-medium text-gray-600 mb-1.5">📑Link Referensi/Materi (Opsional)</span>
+          <input id="as-link" type="url" class="field-input text-sm" placeholder="Contoh: Link GDrive, PPT, PDF materi rapat..." /></label>
+
+<div class="block mb-5">
+          <label class="block"><span class="block text-sm font-medium text-gray-600 mb-1.5">🎥Link Zoom / Meeting Online (Opsional)</span>
+            <input id="as-zoom" type="url" class="field-input text-sm" placeholder="https://zoom.us/j/..." /></label>
+        </div>
         <div class="block mb-5">
                     <div class="flex items-center justify-between mb-2">
             <span class="block text-sm font-medium text-gray-600">Divisi Terlibat</span>
@@ -2700,8 +2713,8 @@ if (type === 'alert') {
       const d = col[i];
       if (!d) { cells += '<div class="ph"></div>'; continue; }
       const head = i === 0;
-      cells += `
-        <label class="flex items-center gap-2 px-3 py-2.5 min-h-[44px] border rounded-lg cursor-pointer shadow-sm transition-all hover:border-evergreen ${head ? 'border-evergreen bg-evergreen-light/30' : 'border-gray-200 bg-white ml-3'}">
+       cells += `
+        <label class="flex items-center gap-2.5 w-full px-3 py-2 min-h-[48px] border rounded-xl cursor-pointer shadow-sm transition-all hover:border-evergreen ${head ? 'border-evergreen bg-evergreen-light/30' : 'border-gray-200 border-l-4 border-l-evergreen-light bg-white'}">
           <input type="checkbox" value="${d}" onchange="handleDivisiCheck(this)" class="divisi-cb w-4 h-4 shrink-0 text-evergreen-dark rounded border-gray-300 focus:ring-evergreen" />
           <span class="text-xs leading-tight ${head ? 'font-extrabold text-gray-900' : 'font-semibold text-gray-700'}">${d}</span>
         </label>`;
@@ -2709,7 +2722,7 @@ if (type === 'alert') {
   });
   return `<div class="divisi-grid" style="--rows:${rows}">${cells}</div>`;
 })()}
-
+</div>
         <div class="block mb-5">
           <span class="block text-sm font-medium text-gray-600 mb-1.5">Peserta Wajib (Internal)</span>
           <div id="peserta-container" class="p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm text-gray-400 text-center">
@@ -2757,6 +2770,8 @@ if (type === 'alert') {
       <form onsubmit="return submitEditSchedule(event, '${s.id}')">
         <label class="block mb-4"><span class="block text-sm font-medium text-gray-600 mb-1.5">Judul Agenda</span>
           <input id="es-nama" class="field-input" value="${s.nama}" required /></label>
+         <label class="block mb-4"><span class="block text-sm font-medium text-gray-600 mb-1.5">Link Zoom / Meeting Online (Opsional)</span>
+          <input id="es-zoom" type="url" class="field-input text-sm" value="${esc(s.zoomLink || '')}" placeholder="https://zoom.us/j/..." /></label>
         
         <div class="block mb-4">
           <span class="block text-sm font-medium text-gray-600 mb-1.5">Peserta Saat Ini (Klik 'X' untuk menghapus)</span>
@@ -2945,7 +2960,12 @@ window.submitAddSchedule = async function(e) {
   const waktuSelesai = document.getElementById('as-waktu-selesai').value;
   const link = document.getElementById('as-link') ? document.getElementById('as-link').value.trim() : '';
   const lokasi = document.getElementById('as-lokasi').value.trim();
-  
+  const zoomEl = document.getElementById('as-zoom');
+  const zoomLink = zoomEl ? zoomEl.value.trim() : '';
+  if (zoomLink && !/^https?:\/\//i.test(zoomLink)) {
+    alert('Link Zoom harus diawali http:// atau https://');
+    return false;
+  }
   // Perbaikan: Pastikan elemen input ada sebelum mengambil nilainya
   const usersEl = document.getElementById('as-users-additional');
   const additionalUsers = usersEl ? usersEl.value.trim() : '';
@@ -2994,6 +3014,7 @@ const selectedDate = new Date(tanggal + 'T00:00:00');
     waktu: waktu,
     lokasi: lokasi,
     refLink: link,
+    zoomLink: zoomLink,
     divisi: Array.from(state.addScheduleDivisi),
     users: picNames,
     level: 'Operasional', // Default level untuk agenda
@@ -3304,6 +3325,12 @@ window.submitEditSchedule = async function(e, id) {
     if (s && !isScheduleOwner(s)) { alert('Akses ditolak: hanya pembuat agenda yang dapat mereschedule.'); return false; }
   if(s) {
     s.nama = document.getElementById('es-nama').value.trim();
+        const zEl = document.getElementById('es-zoom');
+    if (zEl) {
+      const zv = zEl.value.trim();
+      if (zv && !/^https?:\/\//i.test(zv)) { alert('Link Zoom harus diawali http:// atau https://'); return false; }
+      s.zoomLink = zv;
+    }
     const remainingSpans = document.querySelectorAll('#es-current-users span[data-user]');
     let updatedUsers = Array.from(remainingSpans).map(span => span.getAttribute('data-user'));
     const added = document.getElementById('es-users-add').value;
@@ -3561,7 +3588,7 @@ const HW = PW - HDR_M * 2;      // 190 mm                                   // u
     // HALAMAN 2+: NOTULENSI
     // =====================================================
     newPage();
-    title('NOTULENSI RAPAT');
+    title('NOTULENSI');
     info('Agenda', s.nama);
     info('Hari/Tanggal', tglRapat);
     info('Waktu', waktuStr);
@@ -3610,8 +3637,8 @@ const HW = PW - HDR_M * 2;      // 190 mm                                   // u
     const nLines = ['Notulis,', notulisJabatan];
     const dLines = ['Mengetahui,', direkturJabatan];
     const rowN = Math.max(sigLines(nLines, 78).length, sigLines(dLines, 78).length);
-        signature(M + CW * 0.25, nLines, notulisName, 78, rowN, notulisTtd);
-    signature(M + CW * 0.75, dLines, direkturName, 78, rowN, direkturTtd);
+    signature(M + CW * 0.25, dLines, direkturName, 78, rowN, direkturTtd);   // kiri: Mengetahui
+    signature(M + CW * 0.75, nLines, notulisName, 78, rowN, notulisTtd);     // kanan: Notulis
     y += 45;
 
     // =====================================================
@@ -4649,7 +4676,7 @@ function adminCalendarHtml() {
   for (let i = 0; i < firstDay; i++) cells.push(null);
   for (let d = 1; d <= daysInMonth; d++) cells.push(d);
 
-  return `
+    return `
   <div class="flex items-center justify-between mb-4">
     <div class="flex items-center gap-2">${icon('calendar', 'w-4.5 h-4.5 text-evergreen-dark')}<h2 class="font-semibold text-gray-800 capitalize">${monthLabel}</h2></div>
   </div>
@@ -4672,15 +4699,15 @@ function adminCalendarHtml() {
       <div onclick="selectAdminDate('${iso}')" class="${baseClass}">
         <span>${d}</span>
         <div class="flex gap-1 mt-1">
-          ${events.schedule ? `<span class="w-1.5 h-1.5 rounded-full bg-blue-500" title="Ada Agenda"></span>` : ''}
-          ${events.task ? `<span class="w-1.5 h-1.5 rounded-full bg-orange-500" title="Deadline Tugas"></span>` : ''}
+          ${events.schedule ? `<span class="w-1.5 h-1.5 rounded-full ${isSelected ? 'bg-evergreen-dark' : 'bg-evergreen'}" title="Ada Agenda"></span>` : ''}
+          ${events.task ? `<span class="w-1.5 h-1.5 rounded-full bg-rose-500" title="Deadline Tugas"></span>` : ''}
         </div>
       </div>`;
     }).join('')}
   </div>
   <div class="flex items-center justify-center gap-4 mt-5 text-xs text-gray-500 font-medium">
-    <div class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-blue-500"></span> Agenda</div>
-    <div class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-orange-500"></span> Deadline Tugas</div>
+    <div class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-evergreen"></span> Agenda</div>
+    <div class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-rose-500"></span> Deadline Tugas</div>
   </div>`;
 }
 
@@ -4799,11 +4826,11 @@ function miniCalendarHtml(eventMap, activeDate){
       else if (isToday) baseClass += "border border-evergreen text-gray-900 font-bold bg-evergreen-light/20";
       else baseClass += "text-gray-600 hover:bg-gray-100";
 
-      return `<div onclick="selectUserDate('${iso}')" class="${baseClass}">
+            return `<div onclick="selectUserDate('${iso}')" class="${baseClass}">
         <span>${d}</span>
-        ${(!isSelected && (events.schedule || events.task)) ? `
+        ${(events.schedule || events.task) ? `
         <div class="flex gap-1 mt-0.5">
-          ${events.schedule ? `<span class="w-1.5 h-1.5 rounded-full bg-emerald-500" title="Ada Agenda"></span>` : ''}
+          ${events.schedule ? `<span class="w-1.5 h-1.5 rounded-full ${isSelected ? 'bg-evergreen-dark' : 'bg-evergreen'}" title="Ada Agenda"></span>` : ''}
           ${events.task ? `<span class="w-1.5 h-1.5 rounded-full bg-rose-500" title="Deadline Tugas"></span>` : ''}
         </div>` : ''}
       </div>`;
@@ -4812,7 +4839,7 @@ function miniCalendarHtml(eventMap, activeDate){
   
   <!-- LEGENDA WARNA TITIK KALENDER -->
   <div class="flex items-center justify-center gap-3 mt-4 pt-3 border-t border-gray-100 text-[10px] text-gray-500 font-medium">
-    <div class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Agenda</div>
+        <div class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-evergreen"></span> Agenda</div>
     <div class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-rose-500"></span> Tugas</div>
   </div>`;
 }
@@ -5530,7 +5557,7 @@ function renderScheduleCards(filtered, isAdmin) {
 
     scheds.forEach(s => {
       const dInfo = getCardDateInfo(s.tanggal);
-      const isOnline = s.nama.toLowerCase().includes('hybrid') || s.nama.toLowerCase().includes('online') || s.nama.toLowerCase().includes('zoom');
+      const isOnline = !!s.zoomLink || s.nama.toLowerCase().includes('hybrid') || s.nama.toLowerCase().includes('online') || s.nama.toLowerCase().includes('zoom');
       const levelBadge = `<span class="px-2.5 py-1 rounded-md border text-[10px] font-bold uppercase tracking-wider ${LEVEL_STYLE[s.level] || 'bg-gray-50 text-gray-600 border-gray-200'}">${s.level}</span>`;
 
       // --- LOGIKA TOMBOL NOTULENSI & DOKUMENTASI ---
@@ -5544,17 +5571,28 @@ function renderScheduleCards(filtered, isAdmin) {
         ? 'px-4 py-2 rounded-xl bg-blue-50 text-blue-600 hover:bg-blue-100 text-sm font-bold transition-all flex items-center justify-center gap-2 border border-blue-200 shadow-sm active:scale-95 w-full sm:w-auto' 
         : 'px-4 py-2 rounded-xl bg-gray-50 text-gray-500 hover:bg-gray-100 hover:text-gray-700 text-sm font-bold transition-all flex items-center justify-center gap-2 border border-gray-200 shadow-sm active:scale-95 w-full sm:w-auto';
 
-      // Logika Truncate Nama Peserta
+            const allLeader = isAllLeader(s);
+
+      // Peserta
       let usersDisplay = '-';
-      if (s.users && s.users.length > 0) {
-        if (s.divisi.length === DIVISIONS.length) {
-          usersDisplay = '<span class="font-bold text-evergreen-dark">All Leader</span>';
-        } else if (s.users.length > 2) {
-          usersDisplay = `${s.users[0]}, ${s.users[1]} <span class="bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded text-[10px] ml-1 font-bold">+${s.users.length - 2}</span>`;
-        } else {
-          usersDisplay = s.users.join(', ');
-        }
+      if (allLeader) {
+        usersDisplay = '<span class="font-bold text-evergreen-dark">All Leader</span>';
+      } else if (s.users && s.users.length > 2) {
+        usersDisplay = `${esc(s.users[0])}, ${esc(s.users[1])} <span class="bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded text-[10px] ml-1 font-bold">+${s.users.length - 2}</span>`;
+      } else if (s.users && s.users.length > 0) {
+        usersDisplay = s.users.map(esc).join(', ');
       }
+
+      // Divisi
+      let divisiDisplay = '-';
+      if (allLeader) {
+        divisiDisplay = '<span class="font-bold text-evergreen-dark">All Leader</span>';
+      } else if (s.divisi && s.divisi.length > 2) {
+        divisiDisplay = `${esc(s.divisi[0])}, ${esc(s.divisi[1])} <span class="bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded text-[10px] ml-1 font-bold">+${s.divisi.length - 2}</span>`;
+      } else if (s.divisi && s.divisi.length > 0) {
+        divisiDisplay = s.divisi.map(esc).join(', ');
+      }
+      const divisiFull = esc((s.divisi || []).join(', '));
 
       let notulensiHtml = `
         <div class="flex flex-wrap gap-2 shrink-0 mt-3 sm:mt-0 w-full sm:w-auto justify-start sm:justify-end">
@@ -5600,21 +5638,24 @@ function renderScheduleCards(filtered, isAdmin) {
               <span class="truncate">${s.lokasi || '-'}</span>
             </div>
           </div>
+                      ${safeLink(s.zoomLink) ? `
+            <a href="${safeLink(s.zoomLink)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" class="flex items-center gap-2 text-blue-600 hover:underline font-semibold">
+              ${icon('video', 'w-4 h-4')} <span>Link Zoom</span>
+            </a>` : ''}
 
-          <!-- BOTTOM ROW: USERS, DIVISI & STATUS -->
-          <div class="flex flex-wrap items-center justify-between gap-4 pt-2 border-t border-gray-100 text-xs text-gray-500">
-            <div class="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-6 flex-wrap">
-              <span class="flex items-center gap-1.5 text-gray-700 font-medium">
-                ${icon('user', 'w-3.5 h-3.5 shrink-0')} 
-                <span>${usersDisplay}</span>
+                    <!-- BOTTOM ROW: USERS, DIVISI & STATUS -->
+          <div class="flex items-center justify-between gap-4 pt-2 border-t border-gray-100 text-xs text-gray-500">
+            <div class="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-6 min-w-0 flex-1">
+              <span class="flex items-center gap-1.5 text-gray-700 font-medium min-w-0 sm:max-w-[50%]">
+                ${icon('user', 'w-3.5 h-3.5 shrink-0')}
+                <span class="truncate">${usersDisplay}</span>
               </span>
-              <span class="flex items-center gap-1.5 text-gray-700 font-medium">
-                ${icon('tag', 'w-3.5 h-3.5 shrink-0')} 
-                <span>${s.divisi.length === DIVISIONS.length ? 'All Leader' : (s.divisi.length > 0 ? s.divisi.join(', ') : '-')}</span>
+              <span class="flex items-center gap-1.5 text-gray-700 font-medium min-w-0" title="${divisiFull}">
+                ${icon('tag', 'w-3.5 h-3.5 shrink-0')}
+                <span class="truncate">${divisiDisplay}</span>
               </span>
             </div>
-            
-            <div class="flex items-center gap-3 w-full sm:w-auto justify-end">
+            <div class="shrink-0">
               ${statusChip(s.status, SCHEDULE_STATUS_STYLE)}
             </div>
           </div>
@@ -6576,12 +6617,13 @@ window.generateRekap = async function() {
       if (!items.length) text += '\n_Tidak ada agenda pada periode ini._';
       items.forEach((s, i) => {
         const mark = s.status === 'Done' ? '✅ ' : (s.status === 'Canceled' ? '❌ ' : '');
-        const peserta = (s.divisi && s.divisi.length === DIVISIONS.length) ? 'All Leader' : (s.users || []).map(cn).join(', ');
-        text += `\n${i+1}. ${mark}*${s.nama}*\n`
+       const peserta = isAllLeader(s) ? 'All Leader' : (s.users || []).map(cn).join(', ');
+        text += `\n${i+1}.*${s.nama}* ${mark}\n`
           + `📅 ${L(s.tanggal)}\n`
           + `🕐 ${s.waktu} WIB\n`
           + `📍 ${s.lokasi || '-'}\n`
-          + `🔗 ${s.refLink || '-'}\n`
+          + (s.zoomLink ? `🎥 Zoom: ${s.zoomLink}\n` : '')
+          + `🔗 Link Materi: ${s.refLink || '-'}\n`
           + `👥 Peserta: ${peserta || '-'}\n`;
       });
     } else {
