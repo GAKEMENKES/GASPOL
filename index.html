@@ -817,12 +817,12 @@ const REGISTER_JOBS = [
   { jabatan: "Sekretaris Direksi", divisi: "Sekretariat Direksi", role: "admin" },
   { jabatan: "Sekretaris Direktur Sumber Daya Manusia, Pendidikan, dan Penelitian", divisi: "Sekretariat Direktorat SDMPP", role: "admin", scopeDirektorat: "Direktorat SDMPP" },
   { jabatan: "Sekretaris Direktur Perencanaan Keuangan dan Layanan Operasional", divisi: "Sekretariat Direktorat PKLO", role: "admin", scopeDirektorat: "Direktorat PKLO" },
-  { jabatan: "Sekretaris Direktur Pelayanan Medik", divisi: "Sekretariat Direktorat Yanmed", role: "admin", scopeDirektorat: "Direktorat Yanmed" },
+  { jabatan: "Sekretaris Direktur Medik dan Keperawatan", divisi: "Sekretariat Direktorat Yanmed", role: "admin", scopeDirektorat: "Direktorat Yanmed" },
   
   { jabatan: "Plh.Direktur Utama", divisi: "Direktur Utama", role: "admin" },
   { jabatan: "Direktur SDM, Pendidikan, dan Penelitian", divisi: "Direktorat SDMPP", role: "user" },
   { jabatan: "Direktur Keuangan, Perencanaan, dan Layanan Operasional", divisi: "Direktorat PKLO", role: "user" },
-  { jabatan: "Direktur Pelayanan Medik", divisi: "Direktorat Yanmed", role: "user" },
+  { jabatan: "Direktur Medik dan Keperawatan", divisi: "Direktorat Yanmed", role: "user" },
 
   { jabatan: "Manajer Umum dan Rumah Tangga", divisi: "GA", role: "user" },
   { jabatan: "Asisten Manajer Tata Usaha dan Rumah Tangga", divisi: "GA", role: "user" },
@@ -3463,7 +3463,7 @@ if (!notulis || notulis.jabatan === 'Master Admin' || notulis.jabatan === 'Plh.D
 const DIREKTUR_BY_SCOPE = {
   'Direktorat SDMPP':  'Direktur SDM, Pendidikan, dan Penelitian',
   'Direktorat PKLO':   'Direktur Keuangan, Perencanaan, dan Layanan Operasional',
-  'Direktorat Yanmed': 'Direktur Pelayanan Medik'
+  'Direktorat Yanmed': 'Direktur Medik dan Keperawatan',
 };
 const direkturJabatan = notulis.scopeDirektorat ? DIREKTUR_BY_SCOPE[notulis.scopeDirektorat] : 'Direktur Utama';
 const direktur = USERS.find(u => u.jabatan === direkturJabatan)
@@ -3725,11 +3725,9 @@ const HW = PW - HDR_M * 2;      // 190 mm                                   // u
       });
     }
 
-    // Tabel tindak lanjut (dari kalimat yang dijadikan tugas)
-    y += 5;
-    if (!tlTasks.length) {
-      setF('italic', 11); ensure(lh()); doc.text('Tidak ada arahan / rencana tindak lanjut.', M, y); y += lh() + 2;
-    } else {
+        // Tabel tindak lanjut (hanya muncul jika ada tugas turunan)
+    if (tlTasks.length) {
+      y += 5;
       ensure(30);
       doc.autoTable({
         startY: y,
@@ -6564,7 +6562,8 @@ window.executeRestore = async function() {
     await Promise.all([
       window.set(window.ref(window.rtdb, "gaspol_tasks"), data.tasks || {}),
       window.set(window.ref(window.rtdb, "gaspol_schedules"), data.schedules || {}),
-      window.set(window.ref(window.rtdb, "gaspol_users"), data.users || {})
+      // update() menggabungkan: user dari backup dipulihkan, user baru tetap aman
+      window.update(window.ref(window.rtdb, "gaspol_users"), data.users || {})
     ]);
     closeModal();
     openModal('alert', { title: 'Sukses', msg: 'Restore berhasil! Halaman akan dimuat ulang.' });
