@@ -3404,8 +3404,9 @@ window.printUman = async function(id, opts) {
   s.divisi = s.divisi || []; s.users = s.users || []; s.dokumentasi = s.dokumentasi || []; s.hadir = s.hadir || [];
 
   // Buka tab dulu (sinkron dengan klik) agar tidak diblokir pop-up blocker
-     const sameTab = !!(opts && opts.sameTab);
-   const win = sameTab ? null : window.open('', '_blank');
+      const sameTab = !!(opts && opts.sameTab);
+  const quiet = !!(opts && opts.returnBlob);      // mode: hasilkan file saja, tanpa membuka tab
+  const win = (sameTab || quiet) ? null : window.open('', '_blank');
   if (win) win.document.write('<p style="font-family:sans-serif;padding:24px;color:#555">Menyiapkan dokumen PDF…</p>');
 
   try {
@@ -3832,13 +3833,15 @@ const HW = PW - HDR_M * 2;      // 190 mm                                   // u
     }
 
     // ---------- Tampilkan ----------
-       const url = String(doc.output('bloburl'));
+            if (quiet) return doc.output('blob');
+    const url = String(doc.output('bloburl'));
    if (win) win.location.href = url;
    else if (sameTab) window.location.replace(url);
    else doc.save(`Uman_${s.nama}.pdf`); // jika pop-up diblokir, unduh langsung
-  } catch (err) {
+    } catch (err) {
     console.error('Uman gagal:', err);
     if (win) win.close();
+    if (quiet) return null;
     alert('Gagal membuat PDF Uman: ' + err.message);
   }
 };
@@ -5565,12 +5568,49 @@ function getFilteredSchedules(scopeDivisi){
   }).sort((a,b)=> a.tanggal<b.tanggal?-1:1);
 }
 
+
+window._hashStr = str => { let h = 5381; for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0; return String(h); };
+
+// Buat PDF Uman, unggah ke Cloudinary, kembalikan link publik. Hasil disimpan di browser
+// selama isi agenda/tugasnya tidak berubah, jadi ekspor berikutnya cepat dan tidak menumpuk file.
+window.getUmanPublicUrl = async function(s) {
+  const tl = (window.tasks || []).filter(t => t.scheduleRefId === s.id).map(t => [t.name, t.deadline, t.pic, t.divisi, t.taskNum]);
+  const sig = _hashStr(JSON.stringify([s.nama, s.tanggal, s.waktu, s.lokasi, s.zoomLink, s.users, s.hadir, s.notulensi, s.dokumentasi, s.status, tl]));
+  const key = 'uman_pdf_' + s.id;
+  try {
+    const c = JSON.parse(localStorage.getItem(key) || 'null');
+    if (c && c.sig === sig && c.url) return c.url;
+  } catch (e) {}
+
+  const blob = await window.printUman(s.id, { returnBlob: true });
+  if (!blob) return null;
+  const fd = new FormData();
+  fd.append('file', new File([blob], 'Uman_' + s.id + '.pdf', { type: 'application/pdf' }));
+  fd.append('upload_preset', window.CLOUDINARY_PRESET);
+  const res = await fetch(window.CLOUDINARY_URL.replace('/image/upload', '/auto/upload'), { method: 'POST', body: fd });
+  const data = await res.json();
+  if (!data.secure_url) throw new Error((data.error && data.error.message) || 'Upload gagal');
+  try { localStorage.setItem(key, JSON.stringify({ sig, url: data.secure_url })); } catch (e) {}
+  return data.secure_url;
+};
+
 // LOGIKA EXPORT PDF SCHEDULE
-window.exportSchedulePDF = function() {
-  const { jsPDF } = window.jspdf; const doc = new jsPDF('landscape');
-  doc.setFontSize(14); doc.text("Laporan Agenda & Notulensi (GASPOL)", 14, 15);
+window.exportSchedulePDF = async function() {
+  const { jsPDF } = window.jspdf;
   const base = window.location.origin + window.location.pathname;
-  const list = getFilteredSchedules(state.currentUser.role==='admin'?null:state.currentUser.divisi);
+  const list = getFilteredSchedules(state.currentUser.role === 'admin' ? null : state.currentUser.divisi);
+  if (!list.length) return alert('Tidak ada agenda untuk diekspor.');
+
+  alert(`Menyiapkan ${list.length} dokumen Uman. Mohon tunggu dan jangan tutup halaman...`);
+  const urls = [];
+  for (const s of list) {
+    try { urls.push(await getUmanPublicUrl(s)); }
+    catch (e) { console.error('Uman gagal diunggah:', s.nama, e); urls.push(null); }
+  }
+  const failed = urls.filter(u => !u).length;
+
+  const doc = new jsPDF('landscape');
+  doc.setFontSize(14); doc.text("Laporan Agenda & Notulensi (GASPOL)", 14, 15);
   const data = list.map(s => [
     fmtDate(s.tanggal), s.nama, s.status, s.divisi.join(', '), s.users.join(', '), 'Buka Uman'
   ]);
@@ -5582,12 +5622,15 @@ window.exportSchedulePDF = function() {
     },
     didDrawCell: d => {
       if (d.section === 'body' && d.column.index === 5) {
-        doc.link(d.cell.x, d.cell.y, d.cell.width, d.cell.height, { url: base + '?uman=' + list[d.row.index].id });
+        const i = d.row.index;
+        const url = urls[i] || (base + '?uman=' + list[i].id);   // cadangan: link lama jika unggah gagal
+        doc.link(d.cell.x, d.cell.y, d.cell.width, d.cell.height, { url });
       }
     }
   });
   doc.save('Laporan_Agenda.pdf');
-}
+  if (failed) alert(`${failed} dokumen Uman gagal diunggah. Link-nya memakai cara lama (perlu login).`);
+};
 
 /* =========================================================================
    FUNGSI BARU: AUTO-DONE SCHEDULE
@@ -5900,11 +5943,30 @@ function getFilteredTasks(scopeDivisi){
 window.exportTaskPDF = function() {
   const { jsPDF } = window.jspdf; const doc = new jsPDF('landscape');
   doc.setFontSize(14); doc.text("Laporan Data Tugas (GASPOL)", 14, 15);
-  const data = getFilteredTasks(state.currentUser.role==='admin'?null:state.currentUser.divisi).map(t => [
-    fmtDate(t.inputDate || new Date(parseInt(t.id.substring(1))).toISOString().slice(0,10)), 
-    t.name, (t.desc||'').substring(0, 40)+'...', fmtDate(t.deadline), getTaskStatus(t), t.divisi.join(', '), t.pic.join(', ')
+  const list = getFilteredTasks(state.currentUser.role === 'admin' ? null : state.currentUser.divisi);
+  const fixUrl = u => { u = String(u || '').trim(); if (!u) return ''; return /^https?:\/\//i.test(u) ? u : 'https://' + u; };
+  const data = list.map(t => [
+    fmtDate(t.inputDate || new Date(parseInt(t.id.substring(1))).toISOString().slice(0, 10)),
+    t.name, (t.desc || '').substring(0, 40) + '...', fmtDate(t.deadline), getTaskStatus(t),
+    t.divisi.join(', '), t.pic.join(', '),
+    fixUrl(t.proofLink) ? 'Buka Hasil' : '-'
   ]);
-  doc.autoTable({ head: [['Tgl Input', 'Judul Tugas', 'Detail', 'Deadline', 'Status', 'Divisi', 'PIC']], body: data, startY: 22, styles: { fontSize: 8 } });
+  doc.autoTable({
+    head: [['Tgl Input', 'Judul Tugas', 'Detail', 'Deadline', 'Status', 'Divisi', 'PIC', 'Hasil Submit']],
+    body: data, startY: 22, styles: { fontSize: 8 },
+    columnStyles: { 7: { cellWidth: 22, halign: 'center' } },
+    didParseCell: d => {
+      if (d.section === 'body' && d.column.index === 7 && fixUrl(list[d.row.index].proofLink)) {
+        d.cell.styles.textColor = [37, 99, 235]; d.cell.styles.fontStyle = 'bold';
+      }
+    },
+    didDrawCell: d => {
+      if (d.section === 'body' && d.column.index === 7) {
+        const url = fixUrl(list[d.row.index].proofLink);
+        if (url) doc.link(d.cell.x, d.cell.y, d.cell.width, d.cell.height, { url });
+      }
+    }
+  });
   doc.save('Laporan_Task.pdf');
 }
 
