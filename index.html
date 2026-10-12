@@ -582,6 +582,15 @@ window.submitWorkspace = async function(scheduleId) {
   alert(validTasksCount > 0 ? `Seluruh data disimpan & ${validTasksCount} Tugas Turunan didistribusikan!` : `Perubahan Workspace berhasil disimpan!`);
 };
 
+window._dbUnsubs = [];
+
+window.startDataListeners = function () {
+  if (window._dbUnsubs.length) return;   // sudah aktif, jangan dobel
+  // dari sini ke bawah, onValue otomatis dicatat agar bisa dimatikan saat logout
+  const onValue = (q, cb) => {
+    window._dbUnsubs.push(window.onValue(q, cb, err => console.error('Listener gagal:', err)));
+  };
+
   // Menggunakan query untuk memfilter data langsung dari server Firebase
 const tasksQuery = query(ref(rtdb, "gaspol_tasks"), orderByChild("isArchived"), equalTo(false));
 
@@ -638,10 +647,9 @@ const todayNum = d0.getTime();
         // --- UBAH LOGIKA AUTO-ARCHIVE MENJADI SEPERTI INI ---
         // Gunakan doneDate (jika ada) sebagai patokan hitung mundur 3 hari
         if (s.status === 'Done' || s.status === 'Canceled') {
-          const refDateStr = s.doneDate ? s.doneDate : s.tanggal;
-          const refDateNum = new Date(refDateStr + 'T00:00:00').getTime();
+                    const refDateNum = new Date(s.tanggal + 'T00:00:00').getTime();   // patokan: tanggal agenda
           const diffDays = Math.round((todayNum - refDateNum) / 86400000);
-          if (diffDays >= 3) {
+          if (diffDays >= 1) {   // hari sudah lewat -> langsung ke arsip
             s.isArchived = true;
             set(ref(rtdb, "gaspol_schedules/" + s.id), s);
             return; // Hentikan proses render
@@ -672,12 +680,21 @@ window.applyScopeFilter();
       if(typeof renderTabContent === 'function') renderTabContent(); 
     }
   });
+};
+
+window.stopDataListeners = function () {
+  window._dbUnsubs.forEach(fn => { try { fn(); } catch (e) {} });
+  window._dbUnsubs = [];
+  window.tasks = []; window.schedules = []; window.USERS = [];
+  window._rawTasks = []; window._rawSchedules = [];
+};
   
 // Tempatkan di bagian bawah <script type="module">
 
   // --- PEMANTAU SESI FIREBASE (VERSI OPTIMASI) ---
   onAuthStateChanged(auth, async (user) => {
     if (user) {
+      window.startDataListeners();     // <-- TAMBAH BARIS INI
       try {
         const dbRef = ref(rtdb);
         const snapshot = await get(child(dbRef, "gaspol_users/" + user.uid));
@@ -685,6 +702,7 @@ window.applyScopeFilter();
         if (snapshot.exists()) {
           window.state.currentUser = window.normalizeUser ? window.normalizeUser(snapshot.val()) : snapshot.val();
         } else {
+           window.stopDataListeners();      // <-- TAMBAH BARIS INI
           window.state.currentUser = null;
         }
       } catch (error) {
@@ -830,6 +848,7 @@ const REGISTER_JOBS = [
   { jabatan: "Manajer Operasional & Marketing", divisi: "Operasional & Marketing", role: "user" },
   { jabatan: "Asisten Manajer Marketing", divisi: "Operasional & Marketing", role: "user" },
 
+ { jabatan: "Manajer Perencanaan dan Perbendaharaan", divisi: "Keuangan", role: "user" },
   { jabatan: "Asisten Manajer Perencanaan dan Perbendaharaan", divisi: "Keuangan", role: "user" },
   { jabatan: "Asisten Manajer Akuntansi dan BMN", divisi: "Keuangan", role: "user" },
 
@@ -3503,7 +3522,7 @@ const direkturName = direktur.name || '';
     const jabatanOf = n => (USERS.find(u => u.name === n) || {}).jabatan || 'Peserta Luar / Tamu';
 
     // Notulensi HTML -> teks polos (badge nomor tugas dibuang)
-        const notulensiTables = [];
+            const notulensiTables = [];
     const toRGB = col => {
       if (!col) return null;
       const x = document.createElement('canvas').getContext('2d');
@@ -3515,40 +3534,82 @@ const direkturName = direktur.name || '';
       else { const m = v.match(/[\d.]+/g); if (!m || (m.length > 3 && +m[3] === 0)) return null; rgb = m.slice(0, 3).map(Number); }
       return rgb.every(n => n > 250) ? null : rgb;
     };
+    // Bersihkan karakter yang tidak didukung font PDF (zero-width, kutip melengkung, panah, dsb.)
+    const nClean = t => String(t || '')
+      .replace(/[\u200B-\u200D\u2060\uFEFF]/g, '')
+      .replace(/\u00a0/g, ' ')
+      .replace(/[\u2018\u2019]/g, "'")
+      .replace(/[\u201C\u201D]/g, '"')
+      .replace(/[\u2013\u2014]/g, '-')
+      .replace(/\u2026/g, '...')
+      .replace(/[\u2192\u21D2]/g, '->')
+      .replace(/[^\n\t\x20-\x7E\u00A1-\u00FF]/g, '');
     const cellText = c => {
       const x = document.createElement('div');
       x.innerHTML = c.innerHTML.replace(/<br\s*\/?>/gi, '\n').replace(/<\/(div|p|li)>/gi, '\n');
-      return x.textContent.replace(/\u00a0/g, ' ').trim();
+      return nClean(x.textContent).trim();
     };
-    const notulensiText = (() => {
-      const d = document.createElement('div');
-      d.innerHTML = DOMPurify.sanitize(s.notulensi || '');
-      d.querySelectorAll('span[data-temp-id] > span.bg-evergreen-dark').forEach(n => n.remove());
-      d.querySelectorAll('ol, ul').forEach(list => {
-        let n = 0;
-        Array.from(list.children).forEach(li => {
-          if (li.tagName !== 'LI') return;
-          n++;
-          li.insertBefore(document.createTextNode(list.tagName === 'OL' ? n + '. ' : '• '), li.firstChild);
+
+    // Notulensi -> daftar blok terstruktur: {type:'p', lines, indent, marker} atau {type:'table', idx}
+    const nBlocks = (() => {
+      const root = document.createElement('div');
+      root.innerHTML = DOMPurify.sanitize(s.notulensi || '');
+      root.querySelectorAll('span[data-temp-id] > span.bg-evergreen-dark').forEach(n => n.remove()); // badge nomor
+      const out = [];
+      let cur = null, pend = '';
+      const start = indent => { cur = { text: '', indent, marker: pend }; pend = ''; };
+      const flush = () => {
+        if (cur) {
+          const ls = nClean(cur.text).split('\n').map(x => x.replace(/[ \t]+/g, ' ').trim()).filter(Boolean);
+          if (ls.length) out.push({ type: 'p', lines: ls, indent: cur.indent, marker: cur.marker });
+        }
+        cur = null;
+      };
+      const walk = (node, indent) => {
+        node.childNodes.forEach(n => {
+          if (n.nodeType === 3) {
+            if (!cur && !n.nodeValue.trim()) return;
+            if (!cur) start(indent);
+            cur.text += n.nodeValue;
+            return;
+          }
+          if (n.nodeType !== 1) return;
+          const tag = n.tagName;
+          if (tag === 'BR') { if (!cur) start(indent); cur.text += '\n'; return; }
+          if (tag === 'TABLE') {
+            flush();
+            const rows = Array.from(n.rows).map(tr => Array.from(tr.cells).map(c => {
+              const o = { content: cellText(c), colSpan: c.colSpan || 1, rowSpan: c.rowSpan || 1, styles: {} };
+              if (c.tagName === 'TH') o.styles.fontStyle = 'bold';
+              const bg = toRGB(c.style.backgroundColor || c.getAttribute('bgcolor'));
+              if (bg) o.styles.fillColor = bg;
+              return o;
+            }));
+            notulensiTables.push(rows);
+            out.push({ type: 'table', idx: notulensiTables.length - 1 });
+            return;
+          }
+          if (tag === 'OL' || tag === 'UL') {
+            flush();
+            let i = 0;
+            Array.from(n.children).forEach(li => {
+              if (li.tagName !== 'LI') return;
+              i++;
+              flush();
+              pend = tag === 'OL' ? i + '.' : '\u2022';
+              walk(li, indent + 1);
+              flush();
+              pend = '';
+            });
+            return;
+          }
+          if (/^(DIV|P|H[1-6])$/.test(tag)) { flush(); walk(n, indent); flush(); return; }
+          walk(n, indent);
         });
-      });
-      d.querySelectorAll('table').forEach(t => {
-        if (t.parentElement && t.parentElement.closest('table')) return;
-        const rows = Array.from(t.rows).map(tr => Array.from(tr.cells).map(c => {
-          const o = { content: cellText(c), colSpan: c.colSpan || 1, rowSpan: c.rowSpan || 1, styles: {} };
-          if (c.tagName === 'TH') o.styles.fontStyle = 'bold';
-          const bg = toRGB(c.style.backgroundColor || c.getAttribute('bgcolor'));
-          if (bg) o.styles.fillColor = bg;
-          return o;
-        }));
-        notulensiTables.push(rows);
-        const ph = document.createElement('div');
-        ph.textContent = '\n[[TABLE:' + (notulensiTables.length - 1) + ']]\n';
-        t.replaceWith(ph);
-      });
-      const d2 = document.createElement('div');
-            d2.innerHTML = d.innerHTML.replace(/<br\s*\/?>/gi, '\n').replace(/<\/(div|p|li|h[1-6])>/gi, '\n');
-      return d2.textContent.replace(/\u00a0/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+      };
+      walk(root, 0);
+      flush();
+      return out;
     })();
 
     // ---------- Header (diulang di setiap halaman) ----------
@@ -3711,16 +3772,15 @@ const HW = PW - HDR_M * 2;      // 190 mm                                   // u
     y += 4;
     setF('bold', 11.5); doc.text('Hasil Pembahasan:', M, y); y += lh() + 1;
 
-    if (!notulensiText) {
+        if (!nBlocks.length) {
       setF('italic', 11.5); doc.text('Belum ada notulensi untuk agenda ini.', M, y); y += lh();
     } else {
-      setF('normal', 11.5);
-      notulensiText.split('\n').forEach(p => {
-        const tm = p.trim().match(/^\[\[TABLE:(\d+)\]\]$/);
-        if (tm) {
+      const IND = 7; // lebar indentasi per tingkat daftar (mm)
+      nBlocks.forEach(b => {
+        if (b.type === 'table') {
           ensure(20);
           doc.autoTable({
-            startY: y, body: notulensiTables[+tm[1]], theme: 'grid',
+            startY: y, body: notulensiTables[b.idx], theme: 'grid',
             styles: { font: 'times', fontSize: 10.5, cellPadding: 2, lineColor: [80, 80, 80], lineWidth: 0.2, textColor: 20, valign: 'top' },
             margin: { top: contentTop, left: M, right: M, bottom: 20 },
             didDrawPage: () => drawHeader()
@@ -3728,21 +3788,21 @@ const HW = PW - HDR_M * 2;      // 190 mm                                   // u
           y = doc.lastAutoTable.finalY + 4;
           return;
         }
-        if (!p.trim()) { y += lh() * 0.6; return; }
-
         setF('normal', 11.5);
-        const lm = p.match(/^\s*(\d+\.|•)\s+/);          // item daftar: beri indentasi gantung
-        const ind = lm ? 7 : 0;
-        const bodyTxt = lm ? p.slice(lm[0].length) : p;
-        const lines = doc.splitTextToSize(bodyTxt, CW - ind);
-        lines.forEach((line, i) => {
+        const textX = M + b.indent * IND, w = CW - b.indent * IND;
+        const wrapped = [];
+        b.lines.forEach(l => {
+          const parts = doc.splitTextToSize(l, w);
+          parts.forEach((t, i) => wrapped.push({ t, last: i === parts.length - 1 }));
+        });
+        wrapped.forEach((ln, i) => {
           ensure(lh());
           setF('normal', 11.5);
-          if (lm && i === 0) doc.text(lm[1], M + (lm[1] === '•' ? 2 : 0), y);
-          if (i < lines.length - 1) justifyLine(line, M + ind, y, CW - ind);
-          else doc.text(line, M + ind, y);
+          if (i === 0 && b.marker) doc.text(b.marker, textX - 2, y, { align: 'right' }); // nomor/bullet menggantung
+          if (!ln.last) justifyLine(ln.t, textX, y, w); else doc.text(ln.t, textX, y);
           y += lh();
         });
+        y += 1.5; // jarak antar blok
       });
     }
 
@@ -4609,6 +4669,7 @@ window.forgotPassword = async function() {
 };
 
 window.logout = function(){ 
+  window.signOut(window.auth);         // <-- TAMBAH BARIS INI
   const root = document.getElementById('root');
   root.style.opacity = '0';
   root.style.transform = 'scale(0.95)';
@@ -4873,7 +4934,7 @@ function adminDailyDetailsHtml() {
   const activeDate = state.selectedDate || toISO(today);
   const tList = tasks.filter(t => t.deadline === activeDate);
   // Tambahkan filter agar agenda Hold tidak masuk ke daftar harian
-  const sList = schedules.filter(s => s.tanggal === activeDate && s.status !== 'Hold'); 
+ const sList = schedules.filter(s => s.tanggal === activeDate && s.status !== 'Hold').sort(schedCompare);
   const dateStr = fmtDate(activeDate);
 
   let html = `
@@ -5066,7 +5127,7 @@ function userTasksHtml() {
 
 function userMeetingsHtml() {
   const cu = state.currentUser;
-  let myMeetings = homeSchedules().filter(s => s.status !== 'Hold').sort((a,b)=> a.tanggal<b.tanggal?-1:1);
+  let myMeetings = homeSchedules().filter(s => s.status !== 'Hold').sort(schedCompare)
 const holdMeetings = homeSchedules().filter(s => s.status === 'Hold');
   
   if (state.selectedDate) myMeetings = myMeetings.filter(s => s.tanggal === state.selectedDate);
@@ -5222,13 +5283,21 @@ visibleTasks.sort((a, b) => _rank(a) - _rank(b) || (a.deadline < b.deadline ? -1
                    }
                 }
                 
+                  const dlStyle = t.done ? 'bg-green-100 text-green-700'
+                  : badgeText === 'Overdue' ? 'bg-red-100 text-red-600'
+                  : badgeText === 'Due Soon' ? 'bg-yellow-100 text-yellow-700'
+                  : 'bg-slate-100 text-slate-600';
+
                 return `
                 <div onclick='openTaskDetailById("${t.id}")' class="bg-white p-3 rounded-xl border border-gray-100 shadow-sm cursor-pointer hover:border-evergreen/50 transition-colors">
                   <div class="flex justify-between items-start gap-2 mb-1">
                     <p class="font-medium text-gray-800 text-sm line-clamp-2 leading-snug">${t.name}</p>
                     <span class="${badgeStyle} text-[10px] px-2 py-0.5 rounded-full font-bold shrink-0 shadow-sm">${badgeText}</span>
                   </div>
-                  <p class="text-[10px] text-gray-500">${t.divisi.join(', ')} • ${t.pic.join(', ')}</p>
+                  <div class="flex items-end justify-between gap-2">
+                    <p class="text-[10px] text-gray-500 min-w-0 flex-1">${t.divisi.join(', ')} • ${t.pic.join(', ')}</p>
+                    <span class="${dlStyle} shrink-0 whitespace-nowrap inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm">${icon('calendar', 'w-3 h-3')} ${fmtDate(t.deadline)}</span>
+                  </div>
                 </div>
                 `;
               }).join('');
@@ -5573,7 +5642,8 @@ function scheduleFilterBarHtml(showDivisiUser){
 
 window.updateScheduleFilter = function(key, val){ state.scheduleFilters[key] = val; renderScheduleTableOnly(); };
 window.resetScheduleFilters = function(){ state.scheduleFilters = {start:'',end:'',minggu:'',nama:'',level:'',divisi:'',status:''}; renderTabContent(); };
-
+window.schedSortKey = s => (s.tanggal || '') + ' ' + String((s.waktu || '').split('-')[0]).trim().padStart(5, '0');
+window.schedCompare = (a, b) => { const ka = schedSortKey(a), kb = schedSortKey(b); return ka < kb ? -1 : ka > kb ? 1 : 0; };
 function getFilteredSchedules(scopeDivisi){
   const f = state.scheduleFilters; let list = schedules;
   if(scopeDivisi) list = list.filter(s => inMyScope(s.divisi) && (!isAsmen(state.currentUser) || iAmIn(s.users)));
@@ -5585,7 +5655,7 @@ function getFilteredSchedules(scopeDivisi){
     if(f.status && s.status !== f.status) return false;
     if(f.divisi && !s.divisi.includes(f.divisi)) return false;
     return true;
-  }).sort((a,b)=> a.tanggal<b.tanggal?-1:1);
+    }).sort(schedCompare);
 }
 
 
