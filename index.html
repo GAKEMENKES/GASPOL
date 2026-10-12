@@ -334,7 +334,7 @@ window.sortAbsensi = function(names) {
 
 // Daftar user yang boleh dipilih lewat "Pilih Semua"
 window.getAbsensiPool = function(scheduleId) {
-  const s = schedules.find(x => x.id === scheduleId);
+  const s = findSchedule(scheduleId);
   let pool = USERS.filter(u => DIVISIONS.includes(u.divisi) || (!isLiteAdmin() && jabatanRank(u) === 0));
   if (isLiteAdmin()) {
     const allowed = new Set([...(getScopeDivisi() || []), ...((s && s.divisi) || [])]);
@@ -427,7 +427,7 @@ window.searchAbsensi = function(e, scheduleId) {
 };
 // --- Fungsi Navigasi Tab dalam Workspace ---
 window.changeWorkspaceTab = function(scheduleId, tab) {
-  const s = schedules.find(x => x.id === scheduleId);
+  const s = findSchedule(scheduleId);
   if (s) {
     if (tab === 'absensi') { 
       // Reset draft agar murni sesuai kondisi DB setiap kali tab dibuka
@@ -520,7 +520,7 @@ window.hapusDokumentasiWorkspace = function(scheduleId, index) {
 
 // --- FUNGSI UNIFIED SAVE (SIMPAN SEMUA) ---
 window.submitWorkspace = async function(scheduleId) {
-  const s = schedules.find(x => x.id === scheduleId);
+  const s = findSchedule(scheduleId);
   if (!s) return;
 
   const canN = canEditNotulensi(s), canA = canEditAbsensi(s), canD = canEditDokumentasi(s);
@@ -545,7 +545,7 @@ window.submitWorkspace = async function(scheduleId) {
   if (canD) updates.dokumentasi = window.tempDokumentasi || [];
 
   // 3. Status Done hanya oleh penyelenggara (perilaku lama dipertahankan)
-  if (isScheduleOwner(s)) { updates.status = 'Done'; updates.doneDate = toISO(today); }
+    if (isScheduleOwner(s) && !window._wsArchive) { updates.status = 'Done'; updates.doneDate = toISO(today); }
 
   // 4. Tugas turunan (tidak berubah, hanya jika boleh edit notulensi)
   let validTasksCount = 0;
@@ -570,6 +570,9 @@ window.submitWorkspace = async function(scheduleId) {
   }
 
   await window.update(window.ref(window.rtdb, "gaspol_schedules/" + scheduleId), updates);
+    Object.assign(s, updates);   // sinkronkan salinan lokal (penting untuk agenda arsip)
+  const _ar = (window._schedArchive || []).find(x => x.id === scheduleId);
+  if (_ar && _ar !== s) Object.assign(_ar, updates);
   if (updates.notulensi !== undefined) {
     window.set(window.ref(window.rtdb, 'gaspol_live/' + scheduleId + '/html'), updates.notulensi);
   }
@@ -1088,7 +1091,7 @@ window.canEditNotulensi = s => window.isScheduleOwner(s) ||
   (window.isDirutAgenda(s) && !!window.state.currentUser && window.state.currentUser.role === 'admin');
 // Penanda per dokumen dinonaktifkan (diganti label per paragraf). Dibiarkan agar kode lain tidak error.
 window.notulensiByText = () => '';
-window.canEditAbsensi    = s => window.isScheduleOwner(s);
+window.canEditAbsensi    = s => !window._wsArchive && window.isScheduleOwner(s);
 window.canEditDokumentasi = s => !!(window.state.currentUser && window.state.currentUser.role === 'admin');
 
 
@@ -1850,13 +1853,14 @@ if (type === 'absensi') {
 
 if (type === 'scheduleWorkspace') {
     const s = payload.schedule;
+    window._wsArchive = !!(payload.archive || s.isArchived);   // mode arsip: absensi dikunci
     const activeTab = payload.activeTab || 'notulensi';
         const isAdmin = state.currentUser.role === 'admin';
     const canNotulensi = canEditNotulensi(s);
     const canAbsensi   = canEditAbsensi(s);
     const canDok       = canEditDokumentasi(s);
     const canSave      = canNotulensi || canAbsensi || canDok;
-    title = 'Workspace Agenda: ' + s.nama;
+    title = 'Workspace Agenda: ' + s.nama + (window._wsArchive ? ' (Arsip)' : '');
     fullScreen = true;
 
     // Inisialisasi draft lokal selama workspace terbuka
@@ -2514,7 +2518,7 @@ if(type === 'reviewTask') {
   if(type === 'scheduleDetail'){
     const s = payload;
     title = s.nama;
-        const isAdmin = isScheduleOwner(s);   // tombol Edit/Reschedule/Hold/Batalkan hanya untuk pembuat
+            const isAdmin = isScheduleOwner(s) && !s.isArchived;   // tombol Edit/Reschedule/Hold/Batalkan hanya untuk pembuat
 
     let actionButtons = '';
     if (isAdmin) {
@@ -3032,6 +3036,63 @@ window.submitAddTask = async function(e) {
   return false;
 };
 
+// Kotak konfirmasi di tengah layar (mengembalikan true jika user memilih lanjut)
+window.confirmCenter = function (title, message, yesText, noText) {
+  return new Promise(resolve => {
+    const ov = document.createElement('div');
+    ov.className = 'fixed inset-0 z-[100000] flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm anim-fade';
+    ov.innerHTML = `
+      <div class="relative bg-white rounded-[2rem] shadow-[0_30px_80px_rgba(0,0,0,0.35)] max-w-md w-full overflow-hidden anim-popin">
+        <!-- Garis aksen di atas -->
+        <div class="h-1.5 w-full bg-gradient-to-r from-amber-300 via-amber-400 to-orange-400"></div>
+
+        <!-- Tombol tutup -->
+        <button data-act="no" aria-label="Tutup" class="absolute top-4 right-4 p-2 rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-all">
+          ${icon('x', 'w-4 h-4')}
+        </button>
+
+        <div class="px-8 pt-8 pb-7 text-center">
+          <!-- Ikon dengan cincin berlapis -->
+          <div class="mx-auto mb-5 w-24 h-24 rounded-full bg-amber-50 flex items-center justify-center">
+            <div class="w-[4.5rem] h-[4.5rem] rounded-full bg-amber-100 flex items-center justify-center">
+              <div class="w-12 h-12 rounded-full bg-gradient-to-br from-amber-400 to-orange-500 text-white flex items-center justify-center shadow-lg shadow-amber-300/60">
+                ${icon('calendar-clock', 'w-6 h-6')}
+              </div>
+            </div>
+          </div>
+
+          <h3 class="text-xl font-extrabold text-gray-900 tracking-tight mb-2">${esc(title)}</h3>
+          <p class="text-sm text-gray-500 leading-relaxed mb-7 px-1">${esc(message)}</p>
+
+          <div class="flex flex-col-reverse sm:flex-row gap-3">
+            <button data-act="no" class="flex-1 h-12 px-5 rounded-2xl bg-gray-100 text-gray-700 text-sm font-bold hover:bg-gray-200 active:scale-[0.97] transition-all">
+              ${esc(noText || 'Batal')}
+            </button>
+            <button data-act="yes" class="flex-1 h-12 px-5 rounded-2xl bg-evergreen text-gray-900 text-sm font-extrabold hover:bg-evergreen-hover active:scale-[0.97] transition-all shadow-[0_8px_20px_-6px_rgba(163,230,53,0.7)] flex items-center justify-center gap-2 whitespace-nowrap">
+              ${icon('check', 'w-4 h-4')} ${esc(yesText || 'Ya, Lanjutkan')}
+            </button>
+          </div>
+        </div>
+      </div>`;
+
+    const onKey = e => { if (e.key === 'Escape') done(false); };
+    const done = v => {
+      document.removeEventListener('keydown', onKey);
+      ov.remove();
+      resolve(v);
+    };
+
+    ov.querySelectorAll('[data-act="no"]').forEach(b => b.onclick = () => done(false));
+    ov.querySelector('[data-act="yes"]').onclick = () => done(true);
+    ov.addEventListener('click', e => { if (e.target === ov) done(false); });
+    document.addEventListener('keydown', onKey);
+
+    document.body.appendChild(ov);
+    refreshIcons();
+    ov.querySelector('[data-act="yes"]').focus();
+  });
+};
+
 window.submitAddSchedule = async function(e) {
   e.preventDefault(); // Mencegah browser melakukan refresh halaman
   const nama = document.getElementById('as-nama').value.trim();
@@ -3052,13 +3113,18 @@ window.submitAddSchedule = async function(e) {
 
   if(!nama || !tanggal || !waktuMulai) return false;
 
-const selectedDate = new Date(tanggal + 'T00:00:00');
+  const selectedDate = new Date(tanggal + 'T00:00:00');
   const todayDate = new Date();
   todayDate.setHours(0,0,0,0); // Reset jam agar perbandingan adil
-  
+
   if (selectedDate < todayDate) {
-    alert('Pemberitahuan: Tanggal sudah berlalu. Anda tidak bisa membuat agenda di masa lalu.');
-    return false;
+    const lanjut = await confirmCenter(
+      'Tanggal Sudah Lewat',
+      `Tanggal ${fmtDate(tanggal)} sudah berlalu. Apakah Anda tetap ingin menambahkan agenda ini?`,
+      'Ya, Tambahkan',
+      'Batal'
+    );
+    if (!lanjut) return false;
   }
 
   // Sekretaris direktorat: wajib melibatkan minimal 1 divisi di bawah direktoratnya
@@ -3098,7 +3164,8 @@ const selectedDate = new Date(tanggal + 'T00:00:00');
     divisi: Array.from(state.addScheduleDivisi),
     users: picNames,
     level: 'Operasional', // Default level untuk agenda
-    status: 'Scheduled',
+    status: selectedDate < todayDate ? 'Done' : 'Scheduled',
+    ...(selectedDate < todayDate ? { doneDate: toISO(today) } : {}),
     notulensi: '',
     dokumentasi: [],
     isArchived: false,
@@ -5605,7 +5672,7 @@ const myMeetingsAll = homeSchedules();
    ========================================================================= */
 function scheduleFilterBarHtml(showDivisiUser){
   const f = state.scheduleFilters;
-  const availableWeeks = [...new Set(schedules.map(s => getMonthWeekNumber(new Date(s.tanggal))))];
+    const availableWeeks = [...new Set([...schedules, ...(f.arsip ? (window._schedArchive || []) : [])].map(s => getMonthWeekNumber(new Date(s.tanggal))))];
   
   return `
   <div class="flex flex-col gap-4">
@@ -5634,6 +5701,8 @@ function scheduleFilterBarHtml(showDivisiUser){
         </select></div>` : ''}
     </div>
     <div class="flex justify-end gap-3 border-t border-gray-100 pt-3">
+                  ${f.arsip ? '<span class="self-center text-xs font-bold text-evergreen-dark bg-evergreen-light/30 px-3 py-1.5 rounded-full border border-evergreen-light">Termasuk arsip</span>' : ''}
+      <button onclick="searchSchedules()" class="px-5 py-2.5 rounded-xl bg-evergreen text-gray-900 text-sm font-bold hover:bg-evergreen-hover transition-all shadow-md flex items-center gap-2 active:scale-95">${icon('search', 'w-4 h-4')} Cari</button>
       <button class="btn-ghost" onclick="resetScheduleFilters()">${icon('rotate-ccw','w-4 h-4')} Reset Filter</button>
       <button onclick="exportSchedulePDF()" class="px-5 py-2.5 rounded-xl bg-gray-900 text-white text-sm font-bold shadow-md hover:bg-black transition-all flex items-center gap-2">${icon('download', 'w-4 h-4')} Export PDF</button>
     </div>
@@ -5641,11 +5710,61 @@ function scheduleFilterBarHtml(showDivisiUser){
 }
 
 window.updateScheduleFilter = function(key, val){ state.scheduleFilters[key] = val; renderScheduleTableOnly(); };
-window.resetScheduleFilters = function(){ state.scheduleFilters = {start:'',end:'',minggu:'',nama:'',level:'',divisi:'',status:''}; renderTabContent(); };
+window.resetScheduleFilters = function(){ state.scheduleFilters = {start:'',end:'',minggu:'',nama:'',level:'',divisi:'',status:'',arsip:false}; renderTabContent(); };
 window.schedSortKey = s => (s.tanggal || '') + ' ' + String((s.waktu || '').split('-')[0]).trim().padStart(5, '0');
 window.schedCompare = (a, b) => { const ka = schedSortKey(a), kb = schedSortKey(b); return ka < kb ? -1 : ka > kb ? 1 : 0; };
+// Cari agenda: dari daftar aktif, lalu dari cache arsip
+window.findSchedule = id =>
+  (window.schedules || []).find(x => x.id === id) ||
+  (window._archivedSchedCache || {})[id] || null;
+
+// Muat agenda arsip dari server (dipakai filter "Tampilkan arsip")
+window._schedArchive = window._schedArchive || [];
+window.loadScheduleArchive = async function () {
+  try {
+    const q = window.query(window.ref(window.rtdb, 'gaspol_schedules'), window.orderByChild('isArchived'), window.equalTo(true));
+    const snap = await window.get(q);
+    const list = snap.exists() ? Object.values(snap.val()) : [];
+    window._archivedSchedCache = window._archivedSchedCache || {};
+    list.forEach(s => {
+      s.divisi = s.divisi || []; s.users = s.users || [];
+      s.dokumentasi = s.dokumentasi || []; s.hadir = s.hadir || [];
+      window._archivedSchedCache[s.id] = s;
+    });
+    window._schedArchive = list;
+  } catch (e) { console.error(e); alert('Gagal memuat arsip agenda.'); }
+};
+
+window.toggleScheduleArchive = async function (on) {
+  state.scheduleFilters.arsip = on;
+  if (on) await loadScheduleArchive();
+  renderTabContent();
+};
+
+// Tombol Cari: bila ada filter aktif, hasil otomatis menyertakan agenda arsip
+window.searchSchedules = async function () {
+  const f = state.scheduleFilters;
+  const aktif = !!(f.start || f.end || f.minggu || f.nama || f.status || f.divisi);
+  f.arsip = aktif;
+  if (aktif) await loadScheduleArchive();
+  renderTabContent();
+};
+
+// Buka Workspace agenda arsip (hanya Notulensi & Dokumentasi yang bisa diedit)
+window.openArchivedWorkspace = function (id) {
+  const s = findSchedule(id);
+  if (!s) return alert('Data agenda tidak ditemukan.');
+  openModal('scheduleWorkspace', { schedule: s, activeTab: 'notulensi', archive: true });
+};
+
 function getFilteredSchedules(scopeDivisi){
-  const f = state.scheduleFilters; let list = schedules;
+    const f = state.scheduleFilters; let list = schedules;
+  if (f.arsip) {
+    const sc = getScopeDivisi();
+    const have = new Set(list.map(s => s.id));
+    const extra = (window._schedArchive || []).filter(s => !have.has(s.id) && (!sc || (s.divisi || []).some(d => sc.includes(d))));
+    list = list.concat(extra);
+  }
   if(scopeDivisi) list = list.filter(s => inMyScope(s.divisi) && (!isAsmen(state.currentUser) || iAmIn(s.users)));
   return list.filter(s => {
     if(f.start && s.tanggal < f.start) return false;
@@ -5880,7 +5999,7 @@ function renderScheduleCards(filtered, isAdmin) {
       `;
 
       html += `
-      <div class="flex flex-col sm:flex-row items-start sm:items-center gap-4 sm:gap-6 pb-4 border-b border-gray-200 last:border-b-0 last:pb-0 hover:bg-gray-50 p-3 -mx-3 rounded-2xl transition-all cursor-pointer" onclick='openModal("scheduleDetail", schedules.find(x=>x.id==="${s.id}"))'>
+      <div class="flex flex-col sm:flex-row items-start sm:items-center gap-4 sm:gap-6 pb-4 border-b border-gray-200 last:border-b-0 last:pb-0 hover:bg-gray-50 p-3 -mx-3 rounded-2xl transition-all cursor-pointer" onclick='openModal("scheduleDetail", findSchedule("${s.id}"))')'>
         
         <div class="bg-white border border-gray-200 rounded-2xl px-4 py-3 min-w-[95px] text-center shadow-sm shrink-0">
           <span class="text-xs font-bold text-gray-500 uppercase tracking-wider block">${dInfo.dayName}</span>
@@ -5924,7 +6043,7 @@ function renderScheduleCards(filtered, isAdmin) {
               </span>
             </div>
             <div class="shrink-0">
-              ${statusChip(s.status, SCHEDULE_STATUS_STYLE)}
+              ${s.isArchived ? '<span class="mr-2 px-2.5 py-1 rounded-full bg-gray-100 text-gray-500 text-xs font-semibold">Arsip</span>' : ''}${statusChip(s.status, SCHEDULE_STATUS_STYLE)}
             </div>
           </div>
         </div>
@@ -7157,18 +7276,19 @@ if (sc && !(s.divisi || []).some(d => sc.includes(d))) return;
     }
 
     countScheds.textContent = `${archivedScheds.length} ditemukan`;
-        window._archivedSchedCache = {};
+                window._archivedSchedCache = window._archivedSchedCache || {};
     archivedScheds.forEach(s => { window._archivedSchedCache[s.id] = s; });
     if (archivedScheds.length === 0) {
       schedContainer.innerHTML = `<p class="text-sm text-gray-400 py-6 text-center bg-gray-50 rounded-2xl">Tidak ada arsip agenda yang sesuai.</p>`;
     } else {
       schedContainer.innerHTML = archivedScheds.map(s => `
-        <div class="flex items-center justify-between p-4 bg-gray-50 border border-gray-200 rounded-2xl hover:border-evergreen transition-all">
-          <div>
+          <div class="flex items-center justify-between gap-4 p-4 bg-gray-50 border border-gray-200 rounded-2xl hover:border-evergreen transition-all">
+          <div class="min-w-0 flex-1">
             <p class="text-sm font-bold text-gray-900">${s.nama}</p>
             <p class="text-xs text-gray-500 mt-1">${fmtDate(s.tanggal)} • ${s.waktu} • Divisi: ${s.divisi.join(', ')}</p>
           </div>
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-2 shrink-0">
+            ${isAdmin ? `<button onclick='openArchivedWorkspace("${s.id}")' class="px-5 py-2.5 rounded-xl bg-blue-50 text-blue-600 hover:bg-blue-100 text-sm font-bold transition-all flex items-center justify-center gap-2 border border-blue-200 shadow-sm active:scale-95">${icon('layout-list', 'w-4 h-4')} Detail</button>` : ''}
             <button onclick='printUman("${s.id}")' class="px-5 py-2.5 rounded-xl bg-gray-900 text-white hover:bg-black text-sm font-bold transition-all flex items-center justify-center gap-2 shadow-sm active:scale-95">
             ${icon('printer', 'w-4 h-4')} Uman
             </button>
