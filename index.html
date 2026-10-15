@@ -1091,7 +1091,7 @@ window.canEditNotulensi = s => window.isScheduleOwner(s) ||
   (window.isDirutAgenda(s) && !!window.state.currentUser && window.state.currentUser.role === 'admin');
 // Penanda per dokumen dinonaktifkan (diganti label per paragraf). Dibiarkan agar kode lain tidak error.
 window.notulensiByText = () => '';
-window.canEditAbsensi    = s => !window._wsArchive && window.isScheduleOwner(s);
+window.canEditAbsensi    = s => window.isScheduleOwner(s);
 window.canEditDokumentasi = s => !!(window.state.currentUser && window.state.currentUser.role === 'admin');
 
 
@@ -1101,7 +1101,7 @@ function refreshIcons(){ if(window.lucide) lucide.createIcons(); }
 /* =========================================================================
    REUSABLE PIECES
    ========================================================================= */
-function statusChip(status, styleMap){ return `<span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${styleMap[status].chip || styleMap[status]}">${status}</span>`; }
+function statusChip(status, styleMap){ return `<span class="inline-flex items-center justify-center whitespace-nowrap px-3 py-1 rounded-full text-xs font-semibold ${styleMap[status].chip || styleMap[status]}">${status}</span>`; }
 function chipSelectHtml(options, selectedSet, groupName){
   return `<div class="flex flex-wrap gap-2" id="chipgroup-${groupName}">` +
     options.map(opt => `<button type="button" class="px-3 py-1.5 text-xs font-semibold rounded-full border border-gray-200 transition-all ${selectedSet.has(opt)?'bg-evergreen-light/50 border-evergreen text-evergreen-dark':'bg-white text-gray-500 hover:border-evergreen hover:text-evergreen-dark'}" onclick="toggleChip('${groupName}','${opt.replace(/'/g,"\\'")}')">${opt}</button>`).join('') +
@@ -1882,7 +1882,7 @@ if (type === 'scheduleWorkspace') {
          ${canAbsensi ? `
          <button id="ws-btn-absensi" onclick="switchWorkspaceTab('absensi')" class="shrink-0 md:shrink w-auto md:w-full flex items-center p-3 rounded-xl transition-all ${activeTab === 'absensi' ? 'bg-emerald-50 border-emerald-200 border text-emerald-700 shadow-sm' : 'bg-transparent border border-transparent text-gray-600 hover:bg-gray-50'}">
             <div class="ws-icon-bg p-2 rounded-lg mr-3 ${activeTab === 'absensi' ? 'bg-emerald-500 text-white' : 'bg-gray-100 text-gray-500'}">${icon('users', 'w-4 h-4')}</div>
-            <div class="text-left leading-tight hidden md:block"><p class="text-sm font-bold">Absensi</p><p class="text-[10px] opacity-80">Live Search peserta</p></div>
+            <div class="text-left leading-tight hidden md:block"><p class="text-sm font-bold">Absensi</p><p class="text-[10px] opacity-80">${window._wsArchive ? 'Isi absensi susulan' : 'Live Search peserta'}</p></div>
             <div class="text-sm font-bold md:hidden mr-2">Absensi</div>
          </button>` : ''}
          
@@ -6425,9 +6425,9 @@ function taskAdminTableHtml(){
   <div class="overflow-x-auto rounded-3xl border border-gray-200 bg-white shadow-sm">
   <table class="w-full min-w-[680px] text-sm">
     <thead class="bg-gray-50"><tr class="text-left text-xs text-gray-500 font-bold border-b border-gray-200 uppercase tracking-wider">
-      <th class="py-5 px-5">Nama Task</th><th class="py-5 px-5">Deadline</th>
+      <th class="py-5 px-5 w-[38%]">Nama Task</th><th class="py-5 px-5">Deadline</th>
       <th class="py-5 px-5">Divisi</th><th class="py-5 px-5">PIC</th>
-      <th class="py-5 px-5 text-right">Status</th>
+      <th class="py-5 px-5 text-right whitespace-nowrap w-[170px]">Status</th>
     </tr></thead>
     <tbody class="bg-white">
       ${filtered.map(t => `
@@ -6439,7 +6439,7 @@ function taskAdminTableHtml(){
           </td>
           <td class="py-4 px-5 text-gray-500">${t.divisi.join(', ')}</td>
           <td class="py-4 px-5 text-gray-500">${t.pic && t.pic.length > 0 ? t.pic.join(', ') : '-'}</td>
-          <td class="py-4 px-5 text-right">${statusChip(getTaskStatus(t), TASK_STATUS_STYLE)}</td>
+          <td class="py-4 px-5 text-right whitespace-nowrap">${statusChip(getTaskStatus(t), TASK_STATUS_STYLE)}</td>
         </tr>`).join('') || `<tr><td colspan="5" class="py-12 text-center text-gray-500 font-medium">Tidak ada task yang cocok dengan filter.</td></tr>`}
     </tbody>
   </table>
@@ -6452,8 +6452,8 @@ function taskUserTableHtml(){
   <div class="overflow-x-auto rounded-3xl border border-gray-200 bg-white shadow-sm">
   <table class="w-full min-w-[680px] text-sm">
     <thead class="bg-gray-50"><tr class="text-left text-xs text-gray-500 font-bold border-b border-gray-200 uppercase tracking-wider">
-      <th class="py-5 px-5">Nama Task</th><th class="py-5 px-5">Deadline</th>
-      <th class="py-5 px-5">Divisi</th><th class="py-5 px-5 text-right">Status</th>
+     <th class="py-5 px-5 w-[38%]">Nama Task</th><th class="py-5 px-5">Deadline</th>
+      <th class="py-5 px-5">Divisi</th><th class="py-5 px-5 text-right whitespace-nowrap w-[170px]">Status</th>
     </tr></thead>
     <tbody class="bg-white">
       ${filtered.map(t => `
@@ -6464,7 +6464,7 @@ function taskUserTableHtml(){
             ${t.deadlineTime ? `<br><span class="text-xs text-gray-400 font-medium">${t.deadlineTime} WIB</span>` : ''}
           </td>
           <td class="py-4 px-5 text-gray-500">${t.divisi.join(', ')}</td>
-          <td class="py-4 px-5 text-right">${statusChip(getTaskStatus(t), TASK_STATUS_STYLE)}</td>
+         <td class="py-4 px-5 text-right whitespace-nowrap">${statusChip(getTaskStatus(t), TASK_STATUS_STYLE)}</td>
         </tr>`).join('') || `<tr><td colspan="4" class="py-12 text-center text-gray-500 font-medium">Belum ada task untuk divisi Anda.</td></tr>`}
     </tbody>
   </table>
