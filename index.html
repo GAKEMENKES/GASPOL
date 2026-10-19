@@ -696,6 +696,7 @@ window.stopDataListeners = function () {
 
   // --- PEMANTAU SESI FIREBASE (VERSI OPTIMASI) ---
   onAuthStateChanged(auth, async (user) => {
+    if (window._registering) return;   // <-- TAMBAHKAN INI
     if (user) {
       window.startDataListeners();     // <-- TAMBAH BARIS INI
       try {
@@ -4260,284 +4261,128 @@ window.renderRegisterCardContent = function() {
 };
 
 window.submitRegister = async function(e) {
-
   e.preventDefault();
 
   const rawGelarDepan = document.getElementById('register-gelar-depan').value.trim();
   const rawName = document.getElementById('register-name').value.trim();
   const rawGelarBelakang = document.getElementById('register-gelar-belakang').value.trim();
 
-  // Logika Penggabungan: [Gelar Depan] [Nama], [Gelar Belakang]
   let name = rawName;
-  
-  if (rawGelarDepan) {
-      name = `${rawGelarDepan} ${name}`;
-  }
-  
+  if (rawGelarDepan) name = `${rawGelarDepan} ${name}`;
   if (rawGelarBelakang) {
-      // Hilangkan koma jika user tidak sengaja mengetiknya di awal input
-      const cleanGelarBelakang = rawGelarBelakang.startsWith(',') 
-          ? rawGelarBelakang.substring(1).trim() 
-          : rawGelarBelakang;
-      name = `${name}, ${cleanGelarBelakang}`;
+    const cleanBelakang = rawGelarBelakang.startsWith(',') ? rawGelarBelakang.substring(1).trim() : rawGelarBelakang;
+    name = `${name}, ${cleanBelakang}`;
   }
-  
-  // Bersihkan spasi ganda jika ada
   name = name.replace(/\s+/g, ' ').trim();
 
-  
-  const email =
-    document.getElementById('register-email').value.trim();
+  const email = document.getElementById('register-email').value.trim();
+  const jabatan = document.getElementById('register-jabatan').value;
+  const password = document.getElementById('register-password').value;
+  const confirmPassword = document.getElementById('register-password-confirm').value;
+  const job = REGISTER_JOBS.find(j => j.jabatan === jabatan);
 
-  const jabatan =
-    document.getElementById('register-jabatan').value;
+  const btnSubmit = e.target.querySelector('button[type="submit"]');
+  const originalText = btnSubmit.innerHTML;
 
-  const password =
-    document.getElementById('register-password').value;
+  if (!job) { alert("Silakan pilih jabatan."); return false; }
+  if (password !== confirmPassword) { alert("Konfirmasi password tidak sama."); return false; }
 
-  const confirmPassword =
-    document.getElementById('register-password-confirm').value;
-
-  const job =
-    REGISTER_JOBS.find(
-      j => j.jabatan === jabatan
-    );
-
-  const btnSubmit =
-    e.target.querySelector('button[type="submit"]');
-
-  const originalText =
-    btnSubmit.innerHTML;
-
-  if (!job) {
-    alert("Silakan pilih jabatan.");
-    return false;
-  }
-
-  if (password !== confirmPassword) {
-    alert("Konfirmasi password tidak sama.");
-    return false;
+  // Jabatan admin wajib memakai kode admin
+  let adminCode = '';
+  if (job.role === 'admin') {
+    adminCode = (window.prompt('Jabatan ini memerlukan Kode Admin. Masukkan kode dari administrator:') || '').trim();
+    if (!adminCode) { alert('Pendaftaran dibatalkan: Kode Admin wajib diisi.'); return false; }
   }
 
   btnSubmit.innerHTML = "Mendaftarkan...";
   btnSubmit.disabled = true;
+  window._registering = true;
+
+  let firebaseUser = null;
+  let claimWritten = false;
+
+  // Batalkan semua yang sudah terbuat bila ada langkah yang gagal
+  const rollback = async () => {
+    try {
+      if (claimWritten && firebaseUser) {
+        await window.set(window.ref(window.rtdb, "gaspol_adminClaims/" + firebaseUser.uid), null);
+      }
+    } catch (_) {}
+    try { if (firebaseUser) await firebaseUser.delete(); } catch (_) {}
+    try { await window.signOut(window.auth); } catch (_) {}
+    firebaseUser = null;
+  };
 
   try {
+    // 1. Buat akun Auth dulu (agar auth != null saat membaca database)
+    const credential = await window.createUserWithEmailAndPassword(window.auth, email, password);
+    firebaseUser = credential.user;
 
-    /*
-     * =====================================================
-     * 1. CEK APAKAH SLOT JABATAN SUDAH TERISI
-     * =====================================================
-     */
+    // 2. Cek apakah jabatan sudah terisi
+    const q = window.query(
+      window.ref(window.rtdb, "gaspol_users"),
+      window.orderByChild("jabatan"),
+      window.equalTo(jabatan)
+    );
+    const dupSnap = await window.get(q);
+    if (dupSnap.exists()) {
+      await rollback();
+      alert(`Jabatan "${jabatan}" sudah terdaftar. Setiap jabatan hanya dapat memiliki 1 akun.`);
+      return false;
+    }
 
-    const usersSnapshot =
-      await window.get(
-        window.ref(window.rtdb, "gaspol_users")
-      );
-
-    if (usersSnapshot.exists()) {
-
-      const usersData =
-        usersSnapshot.val();
-
-      const jabatanSudahTerisi =
-        Object.values(usersData).some(
-          user => user.jabatan === jabatan
-        );
-
-      if (jabatanSudahTerisi) {
-
-        alert(
-          `Jabatan "${jabatan}" sudah terdaftar. `
-          + `Setiap jabatan hanya dapat memiliki 1 akun.`
-        );
-
-        btnSubmit.innerHTML = originalText;
-        btnSubmit.disabled = false;
-
+    // 3. Untuk jabatan admin: buktikan kode admin (ditolak rules bila salah)
+    if (job.role === 'admin') {
+      try {
+        await window.set(window.ref(window.rtdb, "gaspol_adminClaims/" + firebaseUser.uid), adminCode);
+        claimWritten = true;
+      } catch (err) {
+        await rollback();
+        alert("Kode Admin salah. Pendaftaran dibatalkan.");
         return false;
       }
     }
 
-
-    /*
-     * =====================================================
-     * 2. BUAT AKUN DI FIREBASE AUTHENTICATION
-     * =====================================================
-     */
-
-    const credential =
-      await window.createUserWithEmailAndPassword(
-        window.auth,
-        email,
-        password
-      );
-
-    const firebaseUser =
-      credential.user;
-
-
-    /*
-     * =====================================================
-     * 3. TENTUKAN ROLE
-     * =====================================================
-     */
-
-    const role = job.role;
-
-    /*
-     * =====================================================
-     * 4. SIMPAN PROFIL USER KE RTDB
-     * =====================================================
-     */
-
+    // 4. Simpan profil
     const userData = {
-
       id: firebaseUser.uid,
-
       uid: firebaseUser.uid,
-
       name: name,
-
       email: email,
-
       divisi: job.divisi,
-
       jabatan: jabatan,
-
-      role: role,
-
+      role: job.role,
       title: jabatan,
-
-            createdAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
       ...(job.scopeDirektorat ? { scopeDirektorat: job.scopeDirektorat } : {})
-
     };
+    await window.set(window.ref(window.rtdb, "gaspol_users/" + firebaseUser.uid), userData);
 
-
-    await window.set(
-      window.ref(
-        window.rtdb,
-        "gaspol_users/" + firebaseUser.uid
-      ),
-      userData
-    );
-
-
-    /*
-     * =====================================================
-     * 5. LOGOUT DARI FIREBASE AUTH
-     * =====================================================
-     *
-     * User TIDAK langsung masuk ke dashboard.
-     * Setelah daftar selesai, kita kembalikan ke
-     * halaman "Pilih Akses".
-     */
-
+    // 5. Logout, kembali ke halaman Pilih Akses
     await window.signOut(window.auth);
-
-
-    /*
-     * =====================================================
-     * 6. RESET STATE LOGIN
-     * =====================================================
-     */
-
     state.currentUser = null;
-
     state.isRegistering = false;
-
     state.loginType = null;
-
-
-    /*
-     * =====================================================
-     * 7. KEMBALI KE HALAMAN "PILIH AKSES"
-     * =====================================================
-     */
-
     renderLoginCardContent();
 
-
-    /*
-     * =====================================================
-     * 8. BERIKAN NOTIFIKASI
-     * =====================================================
-     */
-
     setTimeout(() => {
-
-      alert(
-        "Pendaftaran berhasil!\n\n"
-        + "Akun Anda sudah dibuat. "
-        + "Silakan pilih akses dan login menggunakan email "
-        + "serta password yang telah didaftarkan."
-      );
-
+      alert("Pendaftaran berhasil!\n\nAkun Anda sudah dibuat. Silakan pilih akses dan login menggunakan email serta password yang telah didaftarkan.");
     }, 100);
 
-
   } catch (error) {
+    console.error("Error registration:", error);
+    await rollback();
 
-    console.error(
-      "Error registration:",
-      error
-    );
-
-
-    /*
-     * ERROR FIREBASE AUTH
-     */
-
-    if (
-      error.code ===
-      'auth/email-already-in-use'
-    ) {
-
-      alert(
-        "Email tersebut sudah terdaftar."
-      );
-
-    }
-
-    else if (
-      error.code ===
-      'auth/invalid-email'
-    ) {
-
-      alert(
-        "Format email tidak valid."
-      );
-
-    }
-
-    else if (
-      error.code ===
-      'auth/weak-password'
-    ) {
-
-      alert(
-        "Password terlalu lemah. "
-        + "Gunakan minimal 6 karakter."
-      );
-
-    }
-
-    else {
-
-      alert(
-        "Pendaftaran gagal:\n"
-        + error.message
-      );
-
-    }
-
+    if (error.code === 'auth/email-already-in-use') alert("Email tersebut sudah terdaftar.");
+    else if (error.code === 'auth/invalid-email') alert("Format email tidak valid.");
+    else if (error.code === 'auth/weak-password') alert("Password terlalu lemah. Gunakan minimal 6 karakter.");
+    else alert("Pendaftaran gagal:\n" + error.message);
 
     btnSubmit.innerHTML = originalText;
     btnSubmit.disabled = false;
-
+  } finally {
+    window._registering = false;
   }
-
   return false;
 };
 
