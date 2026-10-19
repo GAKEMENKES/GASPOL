@@ -617,8 +617,10 @@ onValue(tasksQuery, (snapshot) => {
   const diffDays = Math.round((todayNum - refNum) / 86400000);
   if (diffDays >= 2) {           // H dan H+1 tampil, H+2 masuk arsip
     t.isArchived = true;
-    set(ref(rtdb, "gaspol_tasks/" + t.id), t);
-    return;
+if (window.state.currentUser && window.state.currentUser.role === 'admin') {
+  set(ref(rtdb, "gaspol_tasks/" + t.id), t).catch(()=>{});
+}
+return;
   }
 }
       window.tasks.push(t);
@@ -654,7 +656,9 @@ const todayNum = d0.getTime();
           const diffDays = Math.round((todayNum - refDateNum) / 86400000);
           if (diffDays >= 1) {   // hari sudah lewat -> langsung ke arsip
             s.isArchived = true;
-            set(ref(rtdb, "gaspol_schedules/" + s.id), s);
+if (window.state.currentUser && window.state.currentUser.role === 'admin') {
+  set(ref(rtdb, "gaspol_schedules/" + s.id), s).catch(()=>{});
+}
             return; // Hentikan proses render
           }
         }
@@ -3038,7 +3042,7 @@ window.submitAddTask = async function(e) {
 };
 
 // Kotak konfirmasi di tengah layar (mengembalikan true jika user memilih lanjut)
-window.confirmCenter = function (title, message, yesText, noText) {
+window.confirmCenter = function (title, message, yesText, noText, iconName) {
   return new Promise(resolve => {
     const ov = document.createElement('div');
     ov.className = 'fixed inset-0 z-[100000] flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm anim-fade';
@@ -3057,8 +3061,8 @@ window.confirmCenter = function (title, message, yesText, noText) {
           <div class="mx-auto mb-5 w-24 h-24 rounded-full bg-amber-50 flex items-center justify-center">
             <div class="w-[4.5rem] h-[4.5rem] rounded-full bg-amber-100 flex items-center justify-center">
               <div class="w-12 h-12 rounded-full bg-gradient-to-br from-amber-400 to-orange-500 text-white flex items-center justify-center shadow-lg shadow-amber-300/60">
-                ${icon('calendar-clock', 'w-6 h-6')}
-              </div>
+            ${icon(iconName || 'calendar-clock', 'w-6 h-6')}
+            </div>
             </div>
           </div>
 
@@ -3299,44 +3303,59 @@ window.handleTaskUserCheck = function(cb) {
   renderTaskPesertaCheckboxes(); 
 };
 
-// Fungsi Simpan Progres Sementara (Tanpa menutup tugas)
 window.saveTaskProgressOnly = async function(id) {
   const t = tasks.find(x => x.id === id);
   if (!t) return;
   const detail = document.getElementById('tp-detail').value.trim();
   if (!detail) return alert('Keterangan Progres wajib diisi!');
 
-  t.progressDetail = detail;
-  t.obstacle = document.getElementById('tp-kendala').value.trim();
-  t.proofLink = document.getElementById('tp-link').value.trim();
-
-  // Pencatatan Timeline
-  if(!t.timeline) t.timeline = [];
-  t.timeline.push({ date: toISO(today), time: new Date().toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'}), title: 'Update Progres', desc: detail });
-
-  await window.set(window.ref(window.rtdb, "gaspol_tasks/" + id), t);
-  alert('Progres berhasil disimpan!');
-  openModal('taskDetail', t); 
+  const patch = {
+    progressDetail: detail,
+    obstacle: document.getElementById('tp-kendala').value.trim(),
+    proofLink: document.getElementById('tp-link').value.trim(),
+    timeline: [...(t.timeline || []), {
+      date: toISO(today),
+      time: new Date().toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'}),
+      title: 'Update Progres', desc: detail
+    }]
+  };
+  try {
+    await window.update(window.ref(window.rtdb, "gaspol_tasks/" + id), patch);
+    Object.assign(t, patch);
+    alert('Progres berhasil disimpan!');
+    openModal('taskDetail', t);
+  } catch (err) {
+    console.error(err);
+    alert('Gagal menyimpan progres: ' + err.message);
+  }
 };
 
 window.requestExtension = async function(id) {
   const t = tasks.find(x => x.id === id);
-  if(!t) return;
-  if(!t.progressDetail) return alert('Silakan isi dan Simpan Progres terlebih dahulu sebelum mengajukan perpanjangan deadline!');
-
+  if (!t) return;
+  if (!t.progressDetail) return alert('Silakan isi dan Simpan Progres terlebih dahulu sebelum mengajukan perpanjangan deadline!');
   const reqDate = document.getElementById('ext-date').value;
   const reason = document.getElementById('ext-reason').value.trim();
-  if(!reqDate || !reason) return alert('Tanggal pengajuan dan alasan wajib diisi!');
+  if (!reqDate || !reason) return alert('Tanggal pengajuan dan alasan wajib diisi!');
 
-  if(!t.extensions) t.extensions = [];
-  t.extensions.push({ reqDate, reason, status: 'pending' });
-
-  if(!t.timeline) t.timeline = [];
-  t.timeline.push({ date: toISO(today), time: new Date().toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'}), title: 'Pengajuan Perpanjangan', desc: `Mengajukan ke tgl ${fmtDate(reqDate)}. Alasan: ${reason}` });
-
-  await window.set(window.ref(window.rtdb, "gaspol_tasks/" + id), t);
-  alert('Pengajuan perpanjangan berhasil dikirim!');
-  openModal('taskDetail', t);
+  const patch = {
+    extensions: [...(t.extensions || []), { reqDate, reason, status: 'pending' }],
+    timeline: [...(t.timeline || []), {
+      date: toISO(today),
+      time: new Date().toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'}),
+      title: 'Pengajuan Perpanjangan',
+      desc: `Mengajukan ke tgl ${fmtDate(reqDate)}. Alasan: ${reason}`
+    }]
+  };
+  try {
+    await window.update(window.ref(window.rtdb, "gaspol_tasks/" + id), patch);
+    Object.assign(t, patch);
+    alert('Pengajuan perpanjangan berhasil dikirim!');
+    openModal('taskDetail', t);
+  } catch (err) {
+    console.error(err);
+    alert('Gagal mengirim pengajuan: ' + err.message);
+  }
 };
 
 window.rejectExtension = async function(id) {
@@ -3392,30 +3411,42 @@ window.submitTaskFinal = async function(id) {
   const link = document.getElementById('tp-link').value.trim();
   if (!detail || !link) return alert('Keterangan Progres dan Link Bukti Kerja wajib diisi!');
 
-  if (!confirm('Yakin tugas ini sudah selesai dan siap di-review Admin?')) return;
-  t.progressDetail = detail;
-  t.obstacle = document.getElementById('tp-kendala').value.trim();
-  t.proofLink = link;
-  t.done = true;
-  t.doneDate = toISO(today);
-  t.reviewStatus = 'waiting';
+  const ok = await confirmCenter(
+    'Tandai Tugas Selesai?',
+    'Pastikan tugas sudah selesai. Setelah dikirim, tugas akan menunggu review Admin.',
+    'Ya, Kirim', 'Batal', 'send'
+  );
+  if (!ok) return;
 
-  if (!t.timeline) t.timeline = [];
-  t.timeline.push({ 
-    date: toISO(today), 
-    time: new Date().toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'}), 
-    title: 'Disubmit untuk Review', 
-    desc: 'Tugas telah diselesaikan oleh user dan menunggu persetujuan admin.' 
-  }); // <--- PASTIKAN KURUNG TUTUP INI LENGKAP
-
-  await window.set(window.ref(window.rtdb, "gaspol_tasks/" + id), t);
-  closeModal();
+  const patch = {
+    progressDetail: detail,
+    obstacle: document.getElementById('tp-kendala').value.trim(),
+    proofLink: link,
+    done: true,
+    doneDate: toISO(today),
+    reviewStatus: 'waiting',
+    timeline: [...(t.timeline || []), {
+      date: toISO(today),
+      time: new Date().toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'}),
+      title: 'Disubmit untuk Review',
+      desc: 'Tugas telah diselesaikan oleh user dan menunggu persetujuan admin.'
+    }]
+  };
+  try {
+    await window.update(window.ref(window.rtdb, "gaspol_tasks/" + id), patch);
+    Object.assign(t, patch);
+    closeModal();
+    alert('Tugas berhasil dikirim untuk di-review Admin!');
+  } catch (err) {
+    console.error(err);
+    alert('Gagal mengirim tugas: ' + err.message);
+  }
 };
 window.approveTask = async function(id) {
   if (isLiteAdmin()) return alert('Akses ditolak: urusan tugas hanya dapat dilakukan Sekretaris Direktur Utama.');
   const t = tasks.find(x => x.id === id);
   if(!t) return;
-  if(!confirm('Setujui dan selesaikan tugas ini secara permanen?')) return;
+  if (!(await confirmCenter('Setujui Tugas?', 'Tugas akan dianggap selesai secara permanen.', 'Ya, Setujui', 'Batal', 'check-circle'))) return;
   t.reviewStatus = 'approved';
   t.approvedDate = toISO(today);
   if(!t.timeline) t.timeline = [];
@@ -5691,6 +5722,7 @@ window.exportSchedulePDF = async function() {
    FUNGSI BARU: AUTO-DONE SCHEDULE
    ========================================================================= */
 function checkAutoDoneSchedules() {
+  if (!state.currentUser || state.currentUser.role !== 'admin') return;
   const now = new Date();
   
   schedules.forEach(s => {
