@@ -4581,7 +4581,8 @@ window.forgotPassword = async function() {
 };
 
 window.logout = function(){ 
-  window.signOut(window.auth);         // <-- TAMBAH BARIS INI
+  window.stopDataListeners();          // matikan listener DULU
+  window.signOut(window.auth);
   const root = document.getElementById('root');
   root.style.opacity = '0';
   root.style.transform = 'scale(0.95)';
