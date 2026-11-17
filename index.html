@@ -343,6 +343,27 @@ window.getAbsensiPool = function(scheduleId) {
   return pool;
 };
 
+window._wsScheduleId = null;
+
+// Simpan sebagian data agenda langsung ke database tanpa menunggu tombol Simpan
+window.autosaveWorkspace = async function (scheduleId, patch) {
+  const s = findSchedule(scheduleId);
+  if (!s) return;
+  try {
+    await window.update(window.ref(window.rtdb, 'gaspol_schedules/' + scheduleId), patch);
+    Object.assign(s, patch);
+    const ar = (window._schedArchive || []).find(x => x.id === scheduleId);
+    if (ar && ar !== s) Object.assign(ar, patch);
+  } catch (e) {
+    console.error(e);
+    alert('Gagal menyimpan otomatis: ' + e.message);
+  }
+};
+
+window.persistAbsensi = function () {
+  return window.autosaveWorkspace(window._wsScheduleId, { hadir: [...(window.tempAbsensi || [])] });
+};
+
 window.toggleSelectAllAbsensi = function(cb) {
   const pool = getAbsensiPool(cb.dataset.sid);
   if (cb.checked) {
@@ -352,6 +373,7 @@ window.toggleSelectAllAbsensi = function(cb) {
     window.tempAbsensi = window.tempAbsensi.filter(n => !names.has(n));
   }
   renderAbsensiList();
+  persistAbsensi();
 };
 
 window.renderAbsensiList = function() {
@@ -383,12 +405,14 @@ window.renderAbsensiList = function() {
 window.removeTempAbsensi = function(name) {
   window.tempAbsensi = window.tempAbsensi.filter(n => n !== name);
   renderAbsensiList();
+  persistAbsensi();
 };
 
 window.addTempAbsensi = function(name) {
   if(name && !window.tempAbsensi.includes(name)) {
     window.tempAbsensi.push(name);
     renderAbsensiList();
+    persistAbsensi();
   }
   document.getElementById('absensi-search').value = '';
   document.getElementById('absensi-search-results').classList.add('hidden');
@@ -444,7 +468,7 @@ window.renderWorkspaceDokumentasi = function(isAdmin, scheduleId) {
   const docs = window.tempDokumentasi || [];
   
   let html = docs.map((imgBase64, idx) => `
-    <div class="relative group cursor-pointer" onclick="openModal('imagePreview', '${imgBase64}')">
+    <div class="relative group cursor-pointer" onclick="openImagePreview('${imgBase64}')">
       <img src="${imgBase64}" class="w-32 h-32 md:w-48 md:h-48 object-cover rounded-xl border border-gray-200 shadow-sm hover:scale-105 transition-transform" />
       ${isAdmin ? `<button onclick="event.stopPropagation(); hapusDokumentasiWorkspace('${scheduleId}',${idx})" class="absolute -top-2 -right-2 bg-rose-500 text-white rounded-full p-1.5 opacity-0 group-hover:opacity-100 transition-opacity shadow-md" title="Hapus Foto">${icon('x', 'w-4 h-4')}</button>` : ''}
     </div>
@@ -458,7 +482,7 @@ window.renderWorkspaceDokumentasi = function(isAdmin, scheduleId) {
       ondrop="event.preventDefault(); this.classList.remove('border-purple-500', 'bg-purple-50', 'text-purple-600'); handleDropDokumentasi(event, '${scheduleId}')"
       class="w-32 h-32 md:w-48 md:h-48 flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-xl cursor-pointer hover:border-purple-400 hover:bg-purple-50 hover:text-purple-500 transition-all text-gray-400">
       ${icon('upload-cloud', 'w-8 h-8')}
-      <span class="text-xs font-bold mt-2">Upload/Drag Foto</span>
+      <span class="text-xs font-bold mt-2 text-center">Upload / Drag<br>atau Ctrl+V</span>
       <input type="file" accept="image/*" class="hidden" onchange="handleUploadDokumentasiWorkspace(this, '${scheduleId}')" />
     </label>`;
   }
@@ -473,49 +497,112 @@ window.renderWorkspaceDokumentasi = function(isAdmin, scheduleId) {
   refreshIcons();
 };
 
-window.handleUploadDokumentasiWorkspace = async function(input, scheduleId) {
-  if(input.files && input.files[0]) {
-    if(window.tempDokumentasi.length >= 2) return alert('Maksimal hanya 2 foto!');
-    
-    // Tampilkan notifikasi kompresi
-    const toastContainer = document.getElementById('toast-container');
-    if(toastContainer) alert("Sedang memproses dan mengompres foto...");
+window._dokUploading = false;
 
-    try {
-      // 1. Lakukan kompresi file otomatis (Maksimal 1280px, Kualitas 70%)
-      const compressedFile = await window.compressImage(input.files[0], 1280, 1280, 0.7);
-      
-      // 2. Siapkan file yang sudah dikompres untuk diupload
-      const formData = new FormData();
-      formData.append("file", compressedFile);
-      formData.append("upload_preset", window.CLOUDINARY_PRESET);
+window.handleUploadDokumentasiWorkspace = async function (input, scheduleId) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  if (!file.type.startsWith('image/')) return alert('File harus berupa gambar.');
+  if (window._dokUploading) return alert('Tunggu, foto sebelumnya masih diunggah...');
+  if (window.tempDokumentasi.length >= 2) return alert('Maksimal hanya 2 foto!');
 
-      // 3. Kirim ke Cloudinary
-      const res = await fetch(window.CLOUDINARY_URL, { method: "POST", body: formData });
-      const data = await res.json();
-      
-      if(data.secure_url) {
-        // --- SISIPKAN KODE INI ---
-        let optimizedUrl = data.secure_url;
-        if (optimizedUrl.includes('/upload/')) {
-            optimizedUrl = optimizedUrl.replace('/upload/', '/upload/f_auto,q_auto/');
-        }
-        // -------------------------
+  window._dokUploading = true;
+  alert('Sedang memproses dan mengompres foto...');
+  try {
+    const compressedFile = await window.compressImage(file, 1280, 1280, 0.7);
+    const formData = new FormData();
+    formData.append('file', compressedFile);
+    formData.append('upload_preset', window.CLOUDINARY_PRESET);
 
-        // Gunakan optimizedUrl alih-alih data.secure_url biasa
-        window.tempDokumentasi.push(optimizedUrl);
-        window.renderWorkspaceDokumentasi(true, scheduleId); 
-      }
-    } catch (err) { 
-      console.error(err);
-      alert("Gagal memproses atau mengupload gambar."); 
-    }
+    const res = await fetch(window.CLOUDINARY_URL, { method: 'POST', body: formData });
+    const data = await res.json();
+    if (!data.secure_url) throw new Error((data.error && data.error.message) || 'Upload gagal');
+
+    let optimizedUrl = data.secure_url;
+    if (optimizedUrl.includes('/upload/')) optimizedUrl = optimizedUrl.replace('/upload/', '/upload/f_auto,q_auto/');
+
+    if (window.tempDokumentasi.length >= 2) return alert('Maksimal hanya 2 foto!');
+    window.tempDokumentasi.push(optimizedUrl);
+    window.renderWorkspaceDokumentasi(true, scheduleId);
+    await window.autosaveWorkspace(scheduleId, { dokumentasi: [...window.tempDokumentasi] });
+  } catch (err) {
+    console.error(err);
+    alert('Gagal memproses atau mengupload gambar.');
+  } finally {
+    window._dokUploading = false;
+    try { input.value = ''; } catch (e) {}
   }
 };
 
-window.hapusDokumentasiWorkspace = function(scheduleId, index) {
+window.hapusDokumentasiWorkspace = async function (scheduleId, index) {
   window.tempDokumentasi.splice(index, 1);
   window.renderWorkspaceDokumentasi(true, scheduleId);
+  await window.autosaveWorkspace(scheduleId, { dokumentasi: [...window.tempDokumentasi] });
+};
+
+document.addEventListener('paste', function (e) {
+  const m = state.modal;
+  if (!m || m.type !== 'scheduleWorkspace') return;
+  const s = m.payload.schedule;
+  if (!canEditDokumentasi(s)) return;
+  const pane = document.getElementById('ws-tab-dokumentasi');
+  if (!pane || pane.classList.contains('opacity-0')) return;   // hanya saat tab Dokumentasi aktif
+  const items = (e.clipboardData && e.clipboardData.items) || [];
+  for (const it of items) {
+    if (it.kind === 'file' && it.type.startsWith('image/')) {
+      const f = it.getAsFile();
+      if (f) { e.preventDefault(); handleUploadDokumentasiWorkspace({ files: [f] }, s.id); }
+      break;
+    }
+  }
+});
+
+window.closeImagePreview = function () {
+  const ov = document.getElementById('img-preview-overlay');
+  if (ov) ov.remove();
+  document.removeEventListener('keydown', window._imgPrevKey);
+};
+
+window.downloadDokumentasiImage = async function (url) {
+  try {
+    const res = await fetch(url, { mode: 'cors' });
+    const blob = await res.blob();
+    const ext = (blob.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'Dokumentasi_' + Date.now() + '.' + ext;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  } catch (e) {
+    // cadangan: minta Cloudinary mengirim sebagai lampiran
+    const alt = String(url).includes('/upload/') ? String(url).replace('/upload/', '/upload/fl_attachment/') : url;
+    window.open(alt, '_blank');
+  }
+};
+
+window.openImagePreview = function (url) {
+  closeImagePreview();
+  const ov = document.createElement('div');
+  ov.id = 'img-preview-overlay';
+  ov.className = 'fixed inset-0 z-[60] flex items-center justify-center p-3 sm:p-4 bg-gray-900/70 backdrop-blur-sm anim-fade';
+  ov.innerHTML = `
+    <div class="bg-white rounded-3xl shadow-2xl w-full max-w-4xl p-4 md:p-6 flex flex-col max-h-[95vh] anim-popin">
+      <h3 class="text-lg font-bold text-gray-800 pb-3 mb-4 border-b border-gray-100 shrink-0">Preview Dokumentasi</h3>
+      <div class="flex-1 min-h-0 flex justify-center items-center bg-gray-100 border border-gray-200 rounded-2xl overflow-hidden p-2">
+        <img src="${esc(url)}" class="max-w-full max-h-[62vh] object-contain rounded-xl shadow-sm" />
+      </div>
+      <div class="flex justify-end gap-3 pt-4 mt-4 border-t border-gray-100 shrink-0">
+        <button data-act="dl" class="px-5 py-2.5 rounded-xl bg-evergreen text-gray-900 font-bold hover:bg-evergreen-hover transition-all shadow-md flex items-center gap-2">${icon('download', 'w-4 h-4')} Download</button>
+        <button data-act="back" class="px-5 py-2.5 rounded-xl bg-gray-900 text-white font-bold hover:bg-black transition-all shadow-md">Kembali</button>
+      </div>
+    </div>`;
+  ov.addEventListener('click', e => { if (e.target === ov) closeImagePreview(); });
+  ov.querySelector('[data-act="back"]').onclick = closeImagePreview;
+  ov.querySelector('[data-act="dl"]').onclick = () => downloadDokumentasiImage(url);
+  window._imgPrevKey = e => { if (e.key === 'Escape') closeImagePreview(); };
+  document.addEventListener('keydown', window._imgPrevKey);
+  document.body.appendChild(ov);
+  refreshIcons();
 };
 
 // --- FUNGSI UNIFIED SAVE (SIMPAN SEMUA) ---
@@ -1858,6 +1945,7 @@ if (type === 'absensi') {
 
 if (type === 'scheduleWorkspace') {
     const s = payload.schedule;
+    window._wsScheduleId = s.id;
     window._wsArchive = !!(payload.archive || s.isArchived);   // mode arsip: absensi dikunci
     const activeTab = payload.activeTab || 'notulensi';
         const isAdmin = state.currentUser.role === 'admin';
@@ -1986,7 +2074,7 @@ notulensiHtml = `
           processedHtml = tempDiv.innerHTML;
       }
       notulensiHtml = processedHtml
-       ? `<div class="notulensi-view text-sm text-gray-700 leading-relaxed whitespace-pre-wrap bg-gray-50 p-6 rounded-2xl border border-gray-100">${processedHtml}</div>${notulensiByText(s) ? `<p class="mt-2 text-[10px] italic text-gray-400">${esc(notulensiByText(s))}</p>` : ''}</div>`
+       ? `<div class="h-full overflow-y-auto pr-2"><div class="notulensi-view text-sm text-gray-700 leading-relaxed whitespace-pre-wrap bg-gray-50 p-6 rounded-2xl border border-gray-100">${processedHtml}</div>${notulensiByText(s) ? `<p class="mt-2 text-[10px] italic text-gray-400">${esc(notulensiByText(s))}</p>` : ''}</div>`
           : `<div class="py-12 flex flex-col items-center text-gray-400">${icon('file-x', 'w-6 h-6 mb-3')}<p class="text-sm font-medium">Belum ada notulensi.</p></div>`;
     }
 
@@ -2581,7 +2669,7 @@ if(type === 'reviewTask') {
         
         <div class="flex gap-4 flex-wrap">
           ${s.dokumentasi.map((imgBase64, idx) => `
-            <div class="relative group cursor-pointer" onclick="openModal('imagePreview', '${imgBase64}')">
+            <div class="relative group cursor-pointer" onclick="openImagePreview('${imgBase64}')">
               <img src="${imgBase64}" class="w-32 h-32 object-cover rounded-xl border border-gray-200 shadow-sm hover:scale-105 transition-transform" />
               ${isAdmin ? `<button onclick="event.stopPropagation(); hapusDokumentasi('${s.id}', ${idx})" class="absolute -top-2 -right-2 bg-rose-500 text-white rounded-full p-1.5 opacity-0 group-hover:opacity-100 transition-opacity shadow-md" title="Hapus Foto">${icon('x', 'w-4 h-4')}</button>` : ''}
             </div>
@@ -6409,7 +6497,10 @@ function renderTabContent(){
   if(state.activeTab === 'task') html = isAdmin ? renderTaskAdmin() : renderTaskUser();
   
   // Rute arsip & export
-  if(state.activeTab === 'export' && isAdmin && !isLiteAdmin()) html = renderExportAdmin();
+ if(state.activeTab === 'export' && isAdmin && !isLiteAdmin()) {
+  html = renderExportAdmin();
+  setTimeout(() => window._bkLog ? renderBackupLog() : loadBackupLog(), 50);
+}
     if (state.activeTab === 'rekap' && isAdmin && !isLiteAdmin()) {
     html = renderRekapAdmin();
     setTimeout(() => generateRekap(), 50);
@@ -6490,10 +6581,18 @@ function renderExportAdmin() {
         <p class="text-gray-500 text-sm mt-1">Tarik data raw (CSV) seluruh data (termasuk yang sudah diarsipkan) untuk dibuka di Spreadsheet atau Excel.</p>
       </div>
 
-            <div class="p-5 bg-gray-50 border border-gray-200 rounded-2xl grid grid-cols-1 sm:grid-cols-3 gap-4">
+       <div class="p-5 bg-gray-50 border border-gray-200 rounded-2xl grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div>
           <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Pilih Bulan & Tahun</label>
           <input type="month" id="export-month" class="field-input w-full" value="${currentMonth}" />
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Rentang Waktu</label>
+          <select id="export-range" class="field-input w-full">
+            <option value="month">Per Bulan</option>
+            <option value="year">Setahun Penuh</option>
+          </select>
+          <span class="text-[10px] text-gray-400 mt-1 block">*Setahun: tahun diambil dari kolom di sebelah kiri</span>
         </div>
         <div>
           <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Divisi</label>
@@ -6540,16 +6639,13 @@ function renderExportAdmin() {
       <input type="file" accept=".json" class="hidden" onchange="restoreFromBackupFile(this)" />
     </label>
   </div>
-  <div class="bg-gray-50 border border-gray-200 rounded-2xl p-5">
+    <div class="bg-gray-50 border border-gray-200 rounded-2xl p-5">
     <div class="flex items-center justify-between mb-3">
-      <h4 class="font-bold text-gray-800 text-sm flex items-center gap-2">${icon('history','w-4 h-4')} Riwayat Backup Otomatis</h4>
-      <button onclick="loadAutoBackupList()" class="text-xs font-bold text-gray-500 hover:text-evergreen-dark">${icon('refresh-cw','w-3.5 h-3.5')} Muat Ulang</button>
+      <h4 class="font-bold text-gray-800 text-sm flex items-center gap-2">${icon('history','w-4 h-4')} Riwayat Backup</h4>
+      <button onclick="loadBackupLog()" class="text-xs font-bold text-gray-500 hover:text-evergreen-dark">${icon('refresh-cw','w-3.5 h-3.5')} Muat Ulang</button>
     </div>
-    <div id="auto-backup-list" class="space-y-2 max-h-72 overflow-y-auto">
-      <p class="text-sm text-gray-400 text-center py-4">Klik "Muat Ulang" untuk menampilkan daftar.</p>
-    </div>
+    <div id="backup-log-list"></div>
   </div>
-</div>
 
     </div>
   </div>`;
@@ -6557,10 +6653,14 @@ function renderExportAdmin() {
 
 window.downloadCSV = async function(type) {
   const monthVal = document.getElementById('export-month').value;
-    const divisiVal = (document.getElementById('export-divisi') || {}).value || '';
+  const divisiVal = (document.getElementById('export-divisi') || {}).value || '';
   const statusVal = (document.getElementById('export-status') || {}).value || '';
-  
+  const rangeVal = (document.getElementById('export-range') || {}).value || 'month';
+
   if (!monthVal) return openModal('alert', { title: 'Peringatan', msg: 'Pilih bulan terlebih dahulu!' });
+
+  // "2026-11" untuk per bulan, "2026" untuk setahun penuh
+  const periodVal = rangeVal === 'year' ? monthVal.slice(0, 4) : monthVal;
 
   try {
     let csvContent = "";
@@ -6569,14 +6669,14 @@ window.downloadCSV = async function(type) {
     if (type === 'agenda') {
       const snap = await window.get(window.child(window.ref(window.rtdb), "gaspol_schedules"));
       csvContent += "Tgl Input,Nama Agenda,Tanggal Agenda,Divisi Hadir,Peserta Hadir,Notulensi Agenda,Foto Dokumentasi 1,Foto Dokumentasi 2,Status\n";
-      
+
       if (snap.exists()) {
         const data = snap.val();
         for (let key in data) {
           const s = data[key];
-          if (s.tanggal && s.tanggal.startsWith(monthVal)) {
+          if (s.tanggal && s.tanggal.startsWith(periodVal)) {
             if (divisiVal && (!s.divisi || !s.divisi.includes(divisiVal))) continue;
-            
+
             const isDone = s.status === 'Done';
             if (statusVal === 'Done' && !isDone) continue;
             if (statusVal === 'Pending' && isDone) continue;
@@ -6600,10 +6700,10 @@ window.downloadCSV = async function(type) {
         const data = snap.val();
         for (let key in data) {
           const t = data[key];
-          const tDate = t.inputDate || t.deadline; 
-          if (tDate && tDate.startsWith(monthVal)) {
+          const tDate = t.inputDate || t.deadline;
+          if (tDate && tDate.startsWith(periodVal)) {
             if (divisiVal && (!t.divisi || !t.divisi.includes(divisiVal))) continue;
-            
+
             if (statusVal === 'Done' && !t.done) continue;
             if (statusVal === 'Pending' && t.done) continue;
 
@@ -6621,7 +6721,7 @@ window.downloadCSV = async function(type) {
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    link.download = `GASPOL_Export_${type}_${monthVal}.csv`;
+    link.download = `GASPOL_Export_${type}_${periodVal}.csv`;
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
@@ -6695,6 +6795,9 @@ link.download = `Backup Data ${monthName} ${yearNow}.json`;
       date: toISO(today),
       by: state.currentUser.name
     });
+
+await window.logBackupDownload('Manual (semua data)');
+window.loadBackupLog();
 
    alert('Backup berhasil diunduh!');
     // Sembunyikan banner pengingat kalau sedang tampil
@@ -6855,6 +6958,139 @@ window.downloadSingleBackup = async function(weekKey) {
   link.href = URL.createObjectURL(blob);
   link.download = `Backup Data ${monthName} ${yearBackup} (Minggu ke-${weekLabel}).json`;
   document.body.appendChild(link); link.click(); document.body.removeChild(link);
+  await window.logBackupDownload('Backup otomatis ' + fmtDate(weekKey));
+window.loadBackupLog();
+};
+
+/* ===== RIWAYAT UNDUH BACKUP ===== */
+window.BK_LOG_PER_PAGE = 10;
+window._bkLog = null;
+window._bkLogPage = 1;
+
+window.logBackupDownload = async function (jenis) {
+  const cu = state.currentUser, now = new Date();
+  try {
+    await window.set(window.ref(window.rtdb, 'gaspol_backupLog/L' + now.getTime()), {
+      by: cu.name,
+      jabatan: cu.jabatan || cu.title || '-',
+      jenis: jenis,
+      date: toISO(now),
+      ts: now.toISOString()
+    });
+  } catch (e) { console.error('Gagal mencatat riwayat backup:', e); }
+};
+
+window.loadBackupLog = async function () {
+  const box = document.getElementById('backup-log-list');
+  if (box) box.innerHTML = '<p class="text-sm text-gray-400 text-center py-4">Memuat...</p>';
+  try {
+    const root = window.ref(window.rtdb);
+    const [logSnap, autoSnap] = await Promise.all([
+      window.get(window.child(root, 'gaspol_backupLog')),
+      window.get(window.child(root, 'gaspol_backups'))
+    ]);
+    const rows = [];
+
+    // MANUAL: dicatat saat admin menekan tombol unduh
+    if (logSnap.exists()) {
+      Object.values(logSnap.val()).forEach(r => rows.push({
+        tipe: 'Manual', by: r.by || '-', jabatan: r.jabatan || '-',
+        ket: r.jenis || '', ts: r.ts
+      }));
+    }
+    // OTOMATIS: snapshot harian yang dibuat sistem
+    if (autoSnap.exists()) {
+      const d = autoSnap.val();
+      Object.keys(d).forEach(k => {
+        const b = d[k];
+        const t = b.tasks ? Object.keys(b.tasks).length : 0;
+        const s = b.schedules ? Object.keys(b.schedules).length : 0;
+        rows.push({
+          tipe: 'Otomatis', by: 'Sistem', jabatan: '-',
+          ket: t + ' tugas • ' + s + ' agenda',
+          ts: b.timestamp || (k + 'T00:00:00.000Z'), key: k
+        });
+      });
+    }
+
+    rows.sort((a, b) => (a.ts < b.ts ? 1 : -1));   // terbaru di atas
+    window._bkLog = rows;
+    window._bkLogPage = 1;
+    renderBackupLog();
+  } catch (e) {
+    console.error(e);
+    if (box) box.innerHTML = '<p class="text-sm text-rose-500 text-center py-4">Gagal memuat riwayat.</p>';
+  }
+};
+window.loadAutoBackupList = window.loadBackupLog;   // kompatibilitas
+
+window.renderBackupLog = function () {
+  const box = document.getElementById('backup-log-list');
+  if (!box) return;
+  const list = window._bkLog;
+  if (!list) { box.innerHTML = '<p class="text-sm text-gray-400 text-center py-4">Memuat...</p>'; return; }
+  if (!list.length) { box.innerHTML = '<p class="text-sm text-gray-400 text-center py-4">Belum ada riwayat backup.</p>'; return; }
+
+  const per = window.BK_LOG_PER_PAGE;
+  const pages = Math.ceil(list.length / per);
+  const page = Math.min(Math.max(1, window._bkLogPage), pages);
+  window._bkLogPage = page;
+  const start = (page - 1) * per;
+  const rows = list.slice(start, start + per);
+
+  const fmt = ts => new Date(ts).toLocaleString('id-ID', {
+    day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+    timeZone: 'Asia/Jakarta'
+  }) + ' WIB';
+
+  const badge = t => t === 'Otomatis'
+    ? '<span class="px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200 text-[10px] font-bold uppercase">Otomatis</span>'
+    : '<span class="px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200 text-[10px] font-bold uppercase">Manual</span>';
+
+  const nums = [];
+  for (let p = Math.max(1, page - 2); p <= Math.min(pages, page + 2); p++) nums.push(p);
+  const pbtn = (label, p, active, disabled) =>
+    `<button ${disabled ? 'disabled' : `onclick="setBackupLogPage(${p})"`} class="min-w-[32px] h-8 px-2 rounded-lg text-xs font-bold transition-all ${active ? 'bg-evergreen text-gray-900 shadow' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-100'} ${disabled ? 'opacity-40 cursor-not-allowed' : ''}">${label}</button>`;
+
+  box.innerHTML = `
+    <div class="overflow-auto max-h-96 rounded-xl border border-gray-200 bg-white">
+      <table class="w-full min-w-[760px] text-sm">
+        <thead class="bg-gray-100 sticky top-0">
+          <tr class="text-left text-[10px] text-gray-500 font-bold uppercase tracking-wider">
+            <th class="py-2.5 px-3 w-12">No</th>
+            <th class="py-2.5 px-3">Nama</th>
+            <th class="py-2.5 px-3">Jabatan</th>
+            <th class="py-2.5 px-3">Jenis</th>
+            <th class="py-2.5 px-3">Tanggal &amp; Waktu</th>
+            <th class="py-2.5 px-3 text-right">Aksi</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map((r, i) => `
+            <tr class="border-t border-gray-100">
+              <td class="py-2.5 px-3 text-gray-400">${start + i + 1}</td>
+              <td class="py-2.5 px-3 font-bold text-gray-800">${esc(r.by)}</td>
+              <td class="py-2.5 px-3 text-gray-600">${esc(r.jabatan)}</td>
+              <td class="py-2.5 px-3">${badge(r.tipe)}<p class="text-[10px] text-gray-400 mt-1">${esc(r.ket)}</p></td>
+              <td class="py-2.5 px-3 text-gray-600 whitespace-nowrap">${fmt(r.ts)}</td>
+              <td class="py-2.5 px-3 text-right whitespace-nowrap">
+                ${r.tipe === 'Otomatis' ? `
+                  <button onclick="downloadSingleBackup('${r.key}')" class="px-3 py-1.5 rounded-lg bg-blue-50 text-blue-600 text-xs font-bold hover:bg-blue-100">Unduh</button>
+                  <button onclick="restoreFromAutoBackup('${r.key}')" class="px-3 py-1.5 rounded-lg bg-rose-50 text-rose-600 text-xs font-bold hover:bg-rose-100">Pulihkan</button>
+                ` : '<span class="text-gray-300">-</span>'}
+              </td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div class="flex items-center justify-between gap-3 mt-3 flex-wrap">
+      <span class="text-xs text-gray-500">Menampilkan ${start + 1}–${start + rows.length} dari ${list.length}</span>
+      <div class="flex items-center gap-1">
+        ${pbtn('‹', page - 1, false, page === 1)}
+        ${nums.map(p => pbtn(p, p, p === page, false)).join('')}
+        ${pbtn('›', page + 1, false, page === pages)}
+      </div>
+    </div>`;
 };
 
 function escCSV(text) {
